@@ -2,13 +2,33 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { SETS } from "../../../lib/sets";
 
 export default function SetPage() {
   const params = useParams();
-  const setId = params?.setId as string | undefined;
+  const setIdRaw = params?.setId;
+  const setId = Array.isArray(setIdRaw)
+    ? setIdRaw[0]
+    : (setIdRaw as string | undefined);
 
   const set = SETS.find((s) => s.setId === setId);
+
+  // ✅ click counts (hidden from UI, used internally)
+  const [clicks, setClicks] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!set?.setId) return;
+
+    fetch(`/api/clicks?setId=${encodeURIComponent(set.setId)}`)
+      .then((r) => r.json())
+      .then((data) => setClicks(data ?? {}))
+      .catch(() => setClicks({}));
+  }, [set?.setId]);
+
+  // still available for future use
+  const getCount = (retailer: string) =>
+    clicks[`${set?.setId}::${retailer}`] ?? 0;
 
   if (!setId || !set) {
     return (
@@ -31,7 +51,7 @@ export default function SetPage() {
       </header>
 
       <section className="w-full max-w-5xl grid grid-cols-2 gap-8">
-        {/* Left: big image */}
+        {/* Left */}
         <div className="border border-gray-800 rounded-md p-4">
           <img
             src={set.imageUrl}
@@ -46,17 +66,25 @@ export default function SetPage() {
           </div>
         </div>
 
-        {/* Right: retailer list */}
+        {/* Right */}
         <div className="border border-gray-800 rounded-md p-4">
           <h2 className="text-xl font-semibold mb-3">Retailers</h2>
 
           <div className="space-y-3">
             {set.offers.map((o, idx) => (
-              <div
+              <a
                 key={idx}
-                className="flex justify-between items-center border border-gray-800 rounded-md px-4 py-3"
+                href={`/out?u=${encodeURIComponent(o.affiliateUrl)}&setId=${encodeURIComponent(
+                  set.setId
+                )}&retailer=${encodeURIComponent(o.retailer)}`}
+                target="_blank"
+                rel="noopener noreferrer nofollow sponsored"
+                className="flex justify-between items-center border border-gray-800 rounded-md px-4 py-3 hover:border-gray-600 hover:bg-gray-900 transition"
               >
-                <span className="font-medium">{o.retailer}</span>
+                <div className="flex flex-col">
+                  <span className="font-medium">{o.retailer}</span>
+                  <span className="text-xs text-gray-500">Open deal</span>
+                </div>
 
                 <div className="flex items-center gap-3">
                   {set.msrp && (
@@ -66,12 +94,12 @@ export default function SetPage() {
                   )}
                   <span className="text-green-400 font-semibold">{o.price}</span>
                 </div>
-              </div>
+              </a>
             ))}
           </div>
 
           <p className="text-xs text-gray-500 mt-4">
-            Prices shown are placeholders until we wire real data.
+            Links go through /out for tracking (beta).
           </p>
         </div>
       </section>
