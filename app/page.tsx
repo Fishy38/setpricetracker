@@ -20,7 +20,7 @@ export default function Home() {
 
       {/* Example results */}
       <section className="w-full max-w-xl space-y-4">
-        <PriceRow store="Amazon" price="$129.99" />
+        <PriceRow store="Amazon" price="$150.99" />
         <PriceRow store="Walmart" price="$134.95" />
         <PriceRow store="Target" price="$139.99" />
       </section>
