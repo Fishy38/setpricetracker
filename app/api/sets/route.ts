@@ -1,10 +1,10 @@
 // app/api/sets/route.ts
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic"; // ⬅️ THIS IS THE FIX
+export const revalidate = 0;             // ⬅️ disable build-time caching
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-export const revalidate = 300; // 5 minutes
 
 export async function GET() {
   const sets = await prisma.set.findMany({
@@ -27,7 +27,7 @@ export async function GET() {
       inStock: o.inStock,
       updatedAt: o.updatedAt,
     })),
-    clicks: (s.clicks ?? []).reduce((acc: Record<string, number>, c) => {
+    clicks: (s.clicks ?? []).reduce<Record<string, number>>((acc, c) => {
       acc[c.retailer] = c.count;
       return acc;
     }, {}),
