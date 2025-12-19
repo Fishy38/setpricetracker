@@ -43,7 +43,7 @@ type UiSetRow = {
 
 type SortKey = "biggestDiscount" | "lowestPrice" | "highestPrice" | "setId";
 
-const PAGE_SIZE = 50 as const;
+const PAGE_SIZE = 80 as const;
 const DEFAULT_SORT: SortKey = "biggestDiscount";
 
 function money(cents?: number | null) {

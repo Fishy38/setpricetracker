@@ -15,6 +15,22 @@ import {
 
 type Retailer = "LEGO" | "Amazon" | "Walmart" | "Target";
 
+// Helper to build affiliate deep link via our API
+async function buildAffiliateUrl(merchantId: string, destinationUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/rakuten/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ merchantId, destinationUrl }),
+    });
+    const data = await res.json();
+    return data.affiliateLink || null;
+  } catch (err) {
+    console.error("Affiliate URL generation failed", err);
+    return null;
+  }
+}
+
 function dollarsToCents(msrp?: string | number | null): number | null {
   if (msrp == null) return null;
   if (typeof msrp === "number") return Math.round(msrp * 100);
@@ -36,9 +52,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const merchantId = process.env.RAKUTEN_ADVERTISER_ID;
+  if (!merchantId) {
+    console.warn("Warning: RAKUTEN_ADVERTISER_ID not set — LEGO links may not be tracked.");
+  }
+
   for (const s of SETS as any[]) {
     const setId = String(s.setId);
     const imageUrl = String(s.imageUrl);
+    const msrp = dollarsToCents(s.msrp);
 
     const legoUrlStored =
       typeof s.legoUrl === "string" && s.legoUrl.trim().length ? s.legoUrl.trim() : null;
@@ -49,35 +71,44 @@ export async function POST(req: Request) {
       update: {
         name: s.name ?? null,
         imageUrl,
-        msrp: dollarsToCents(s.msrp),
+        msrp,
         legoUrl: legoUrlStored,
       },
       create: {
         setId,
         name: s.name ?? null,
         imageUrl,
-        msrp: dollarsToCents(s.msrp),
+        msrp,
         legoUrl: legoUrlStored,
       },
     });
 
-    // 2) Build affiliate LEGO url (Rakuten) pointing at product page when possible
+    // 2) Build affiliate LEGO URL
     const destinationUrl = legoUrlStored ?? legoSearchUrl(setId);
 
-    const offerId =
-      typeof s.rakutenOfferId === "string" && s.rakutenOfferId.trim().length
-        ? s.rakutenOfferId.trim()
-        : undefined;
+    // Try using canonical affiliate link via Rakuten API
+    let legoAffiliateUrl: string | null = null;
+    if (merchantId && destinationUrl) {
+      legoAffiliateUrl = await buildAffiliateUrl(merchantId, destinationUrl);
+    }
 
-    const legoAffiliateUrl = legoAffiliateUrlFromProductPage({
-      setId,
-      destinationUrl,
-      offerId,
-    });
+    // If that failed, fall back to rakutenOfferId
+    if (!legoAffiliateUrl) {
+      const offerId =
+        typeof s.rakutenOfferId === "string" && s.rakutenOfferId.trim().length
+          ? s.rakutenOfferId.trim()
+          : undefined;
 
-    // 3) Upsert offers (LEGO gets affiliate url; other retailers are search urls for now)
+      legoAffiliateUrl = legoAffiliateUrlFromProductPage({
+        setId,
+        destinationUrl,
+        offerId,
+      });
+    }
+
+    // 3) Upsert Offers
     const offers: { retailer: Retailer; url: string; price: number | null }[] = [
-      { retailer: "LEGO", url: legoAffiliateUrl, price: dollarsToCents(s.msrp) },
+      { retailer: "LEGO", url: legoAffiliateUrl!, price: msrp },
       { retailer: "Amazon", url: amazonSearchUrl(setId), price: null },
       { retailer: "Walmart", url: walmartSearchUrl(setId), price: null },
       { retailer: "Target", url: targetSearchUrl(setId), price: null },

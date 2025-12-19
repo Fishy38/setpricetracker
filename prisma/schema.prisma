@@ -15,14 +15,18 @@ enum Retailer {
 }
 
 model Set {
-  id        String   @id @default(cuid())
-  setId     String   @unique
-  name      String?
-  imageUrl  String
-  msrp      Int? // cents
-  legoUrl   String? 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String   @id @default(cuid())
+  setId            String   @unique
+  name             String?
+  imageUrl         String
+  msrp             Int?
+  legoUrl          String?
+  canonicalUrl     String?  // <-- add this
+  rakutenProductId String?  // <-- optional: already in your code
+  advertiserId     String?  // <-- optional: already in your code
+  lastSyncedAt     DateTime? // <-- optional: already in your code
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   offers Offer[]
   clicks Click[]
