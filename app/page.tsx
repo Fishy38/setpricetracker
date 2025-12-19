@@ -292,20 +292,11 @@ export default function Home() {
                 onKeyDown={(e) => e.key === "Enter" && go()}
                 type="text"
                 placeholder="Search by set # or name (e.g. 75394 or flower)"
-                className="
-                  flex-1 rounded-md px-4 py-3
-                  bg-gray-900 text-white placeholder-gray-400
-                  border border-gray-700
-                  focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400
-                "
+                className="flex-1 rounded-md px-4 py-3 bg-gray-900 text-white placeholder-gray-400 border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400"
               />
               <button
                 onClick={go}
-                className="
-                  px-4 py-3 rounded-md
-                  bg-green-400 text-black font-semibold
-                  hover:bg-green-300 transition
-                "
+                className="px-4 py-3 rounded-md bg-green-400 text-black font-semibold hover:bg-green-300 transition"
               >
                 Go
               </button>
@@ -326,12 +317,7 @@ export default function Home() {
             <select
               value={sortKey}
               onChange={(e) => onChangeSort(e.target.value as SortKey)}
-              className="
-                rounded-md px-3 py-2
-                bg-gray-900 text-white
-                border border-gray-700
-                focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400
-              "
+              className="rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400"
             >
               <option value="biggestDiscount">Biggest discount %</option>
               <option value="lowestPrice">Lowest price</option>
@@ -362,18 +348,6 @@ export default function Home() {
       </section>
 
       {!loading && (
-        <div className="w-full max-w-6xl mt-8 flex items-center justify-between text-xs text-gray-500">
-          <div>
-            Page {page} of {pageCount} • Showing{" "}
-            {pageList.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–
-            {(page - 1) * PAGE_SIZE + pageList.length} of{" "}
-            {filteredSortedList.length}
-          </div>
-          <div className="text-gray-600">Page size: {PAGE_SIZE}</div>
-        </div>
-      )}
-
-      {!loading && (
         <Pagination
           page={page}
           pageCount={pageCount}
@@ -390,7 +364,6 @@ export default function Home() {
     </main>
   );
 }
-
 function PriceCard({
   setId,
   imageUrl,
