@@ -19,7 +19,7 @@ type ApiSetRow = {
   name?: string | null;
   imageUrl: string;
   msrp?: number | null; // cents
-  bestOffer?: ApiOffer | null; // ✅ NEW
+  bestOffer?: ApiOffer | null;
   offers: ApiOffer[];
 };
 
@@ -32,7 +32,7 @@ type UiSetRow = {
   setId: string;
   imageUrl: string;
   msrpCents: number | null;
-  bestOffer: UiOffer | null; // ✅ NEW
+  bestOffer: UiOffer | null;
 };
 
 function money(cents?: number | null) {
@@ -44,7 +44,7 @@ function parseToCents(v: unknown): number | null {
   if (v == null) return null;
 
   if (typeof v === "number") {
-    if (Number.isInteger(v)) return v; // assume cents
+    if (Number.isInteger(v)) return v; // cents
     return Math.round(v * 100); // dollars -> cents
   }
 
@@ -86,23 +86,40 @@ function normalizeSets(input: any[]): UiSetRow[] {
   });
 }
 
+function SkeletonCard() {
+  return (
+    <div className="border border-gray-800 rounded-md p-3 animate-pulse">
+      <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-gray-900" />
+      <div className="h-3 w-20 bg-gray-900 rounded mb-2" />
+      <div className="h-4 w-28 bg-gray-900 rounded mb-2" />
+      <div className="h-4 w-16 bg-gray-900 rounded" />
+    </div>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const [q, setQ] = useState("");
 
-  const [sets, setSets] = useState<UiSetRow[]>(
-    normalizeSets(FALLBACK_SETS as any)
-  );
+  // ✅ start empty + loading (prevents the "fallback -> api" swap glitch)
+  const [loading, setLoading] = useState(true);
+  const [sets, setSets] = useState<UiSetRow[]>([]);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch("/api/sets", { cache: "no-store" });
-        if (!res.ok) return;
+        if (!res.ok) throw new Error("bad response");
         const data = (await res.json()) as ApiSetRow[];
-        if (Array.isArray(data) && data.length) setSets(normalizeSets(data as any));
+        if (Array.isArray(data) && data.length) {
+          setSets(normalizeSets(data as any));
+        } else {
+          setSets(normalizeSets(FALLBACK_SETS as any));
+        }
       } catch {
-        // keep fallback
+        setSets(normalizeSets(FALLBACK_SETS as any));
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
@@ -153,20 +170,26 @@ export default function Home() {
       </section>
 
       <section className="w-full max-w-6xl grid grid-cols-4 gap-4">
-        {setList.map((set) => (
-          <PriceCard
-            key={set.setId}
-            setId={set.setId}
-            imageUrl={set.imageUrl}
-            store={set.bestOffer?.retailer ?? "Unknown"}
-            priceCents={set.bestOffer?.priceCents ?? null}
-            msrpCents={set.msrpCents}
-          />
-        ))}
+        {loading ? (
+          Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
+        ) : (
+          setList.map((set) => (
+            <PriceCard
+              key={set.setId}
+              setId={set.setId}
+              imageUrl={set.imageUrl}
+              store={set.bestOffer?.retailer ?? "Unknown"}
+              priceCents={set.bestOffer?.priceCents ?? null}
+              msrpCents={set.msrpCents}
+            />
+          ))
+        )}
       </section>
 
       <footer className="mt-16 text-sm text-gray-500 text-center">
-        <p className="mb-2">As an Amazon Associate, we earn from qualifying purchases.</p>
+        <p className="mb-2">
+          As an Amazon Associate, we earn from qualifying purchases.
+        </p>
         <p>© {new Date().getFullYear()} SetPriceTracker</p>
       </footer>
     </main>
@@ -190,11 +213,18 @@ function PriceCard({
     <Link href={`/set/${setId}`} className="w-full">
       <div className="border border-gray-800 rounded-md p-3 hover:border-gray-600 hover:bg-gray-900 transition cursor-pointer">
         <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-black">
-          <img src={imageUrl} alt={`LEGO set ${setId}`} className="w-full h-full object-cover" />
+          <img
+            src={imageUrl}
+            alt={`LEGO set ${setId}`}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
         </div>
 
         <div className="flex items-baseline gap-1 mb-1">
-          <span className="text-xs uppercase tracking-wide text-gray-500">Set</span>
+          <span className="text-xs uppercase tracking-wide text-gray-500">
+            Set
+          </span>
           <span className="text-gray-300 font-semibold">{setId}</span>
         </div>
 
@@ -202,9 +232,13 @@ function PriceCard({
 
         <div className="flex items-end gap-2">
           {msrpCents != null && (
-            <span className="text-xs text-gray-500 line-through">{money(msrpCents)}</span>
+            <span className="text-xs text-gray-500 line-through">
+              {money(msrpCents)}
+            </span>
           )}
-          <span className="text-green-400 font-semibold">{money(priceCents)}</span>
+          <span className="text-green-400 font-semibold">
+            {money(priceCents)}
+          </span>
         </div>
       </div>
     </Link>
