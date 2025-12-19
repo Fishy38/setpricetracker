@@ -23,11 +23,11 @@ export async function GET() {
     offers: s.offers.map((o) => ({
       retailer: o.retailer,
       price: o.price,
-      url: o.url, // ✅ your schema field
+      url: o.url,
       inStock: o.inStock,
       updatedAt: o.updatedAt,
     })),
-    clicks: s.clicks.reduce<Record<string, number>>((acc, c) => {
+    clicks: (s.clicks ?? []).reduce((acc: Record<string, number>, c) => {
       acc[c.retailer] = c.count;
       return acc;
     }, {}),
