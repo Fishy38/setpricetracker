@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/refresh/lego-all",
-      "schedule": "0 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
