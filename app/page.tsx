@@ -1,14 +1,14 @@
-// app/page.tsx
 "use client";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SETS as FALLBACK_SETS } from "../lib/sets";
+import { parsePriceToCents as parseToCents } from "@/lib/utils";
 
 type ApiOffer = {
   retailer: string;
-  price: number | null; // cents
+  price: number | null;
   url?: string | null;
   inStock?: boolean | null;
   updatedAt?: string | Date;
@@ -18,10 +18,9 @@ type ApiSetRow = {
   setId: string;
   name?: string | null;
   imageUrl: string;
-  msrp?: number | null; // cents
+  msrp?: number | null;
   offers: ApiOffer[];
   bestOffer?: ApiOffer | null;
-
   discountCents?: number | null;
   discountPct?: number | null;
 };
@@ -43,32 +42,12 @@ type UiSetRow = {
 
 type SortKey = "biggestDiscount" | "lowestPrice" | "highestPrice" | "setId";
 
-const PAGE_SIZE = 80 as const;
+const PAGE_SIZE = 80;
 const DEFAULT_SORT: SortKey = "biggestDiscount";
 
 function money(cents?: number | null) {
   if (cents == null) return "—";
   return `$${(cents / 100).toFixed(2)}`;
-}
-
-function parseToCents(v: unknown): number | null {
-  if (v == null) return null;
-
-  if (typeof v === "number") {
-    if (Number.isInteger(v)) return v; // cents
-    return Math.round(v * 100); // dollars -> cents
-  }
-
-  if (typeof v === "string") {
-    const cleaned = v.replace(/[^0-9.]/g, "");
-    if (!cleaned) return null;
-    const n = Number(cleaned);
-    if (Number.isNaN(n)) return null;
-    if (cleaned.includes(".") || n < 1000) return Math.round(n * 100); // dollars-ish
-    return Math.round(n); // cents-ish
-  }
-
-  return null;
 }
 
 function normalizeSets(input: any[]): UiSetRow[] {
@@ -129,7 +108,7 @@ function sortSets(list: UiSetRow[], sortKey: SortKey): UiSetRow[] {
       if (ap == null && bp == null) return tie();
       if (ap == null) return 1;
       if (bp == null) return -1;
-      return bp - ap || tie(); // biggest first
+      return bp - ap || tie();
     }
 
     if (sortKey === "lowestPrice") {
@@ -193,24 +172,18 @@ export default function Home() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // URL-driven state
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_SORT);
   const [page, setPage] = useState(1);
-
   const [loading, setLoading] = useState(true);
   const [sets, setSets] = useState<UiSetRow[]>([]);
-
-  // prevent URL sync loops
   const didInitFromUrl = useRef(false);
 
-  // 1) Init state from URL (and whenever URL changes via back/forward)
   useEffect(() => {
     const urlQ = sp.get("q") ?? "";
     const urlSort = coerceSort(sp.get("sort"));
     const urlPage = coercePage(sp.get("page"));
 
-    // on first mount, always hydrate from URL
     if (!didInitFromUrl.current) {
       didInitFromUrl.current = true;
       setQ(urlQ);
@@ -219,13 +192,11 @@ export default function Home() {
       return;
     }
 
-    // on back/forward, update if differs
     setQ((prev) => (prev !== urlQ ? urlQ : prev));
     setSortKey((prev) => (prev !== urlSort ? urlSort : prev));
     setPage((prev) => (prev !== urlPage ? urlPage : prev));
   }, [sp]);
 
-  // 2) Fetch sets
   useEffect(() => {
     (async () => {
       try {
@@ -233,19 +204,18 @@ export default function Home() {
         if (!res.ok) throw new Error("bad response");
         const data = (await res.json()) as ApiSetRow[];
         if (Array.isArray(data) && data.length) {
-          setSets(normalizeSets(data as any));
+          setSets(normalizeSets(data));
         } else {
-          setSets(normalizeSets(FALLBACK_SETS as any));
+          setSets(normalizeSets(FALLBACK_SETS));
         }
       } catch {
-        setSets(normalizeSets(FALLBACK_SETS as any));
+        setSets(normalizeSets(FALLBACK_SETS));
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // 3) Derived list + pageCount
   const filteredSortedList = useMemo(() => {
     const filtered = (sets ?? []).filter((s) => matchesQuery(s, q));
     return sortSets(filtered, sortKey);
@@ -255,7 +225,6 @@ export default function Home() {
     return Math.max(1, Math.ceil(filteredSortedList.length / PAGE_SIZE));
   }, [filteredSortedList.length]);
 
-  // Keep page in range when data/search changes
   useEffect(() => {
     setPage((p) => clamp(p, 1, pageCount));
   }, [pageCount]);
@@ -266,7 +235,6 @@ export default function Home() {
     return filteredSortedList.slice(start, start + PAGE_SIZE);
   }, [filteredSortedList, page, pageCount]);
 
-  // 4) Sync state -> URL (replaceState so it’s not spammy)
   useEffect(() => {
     if (!didInitFromUrl.current) return;
 
@@ -285,13 +253,10 @@ export default function Home() {
   function go() {
     const raw = q.trim();
     if (!raw) return;
-
     if (isNumericQuery(raw)) {
       router.push(`/set/${raw}`);
       return;
     }
-
-    // names: do NOT navigate; just filter the grid
   }
 
   function onChangeSort(next: SortKey) {
@@ -404,17 +369,22 @@ export default function Home() {
             {(page - 1) * PAGE_SIZE + pageList.length} of{" "}
             {filteredSortedList.length}
           </div>
-
           <div className="text-gray-600">Page size: {PAGE_SIZE}</div>
         </div>
       )}
 
       {!loading && (
-        <Pagination page={page} pageCount={pageCount} onPageChange={onChangePage} />
+        <Pagination
+          page={page}
+          pageCount={pageCount}
+          onPageChange={onChangePage}
+        />
       )}
 
       <footer className="mt-16 text-sm text-gray-500 text-center">
-        <p className="mb-2">As an Amazon Associate, we earn from qualifying purchases.</p>
+        <p className="mb-2">
+          As an Amazon Associate, we earn from qualifying purchases.
+        </p>
         <p>© {new Date().getFullYear()} SetPriceTracker</p>
       </footer>
     </main>
@@ -454,7 +424,6 @@ function PriceCard({
             className="w-full h-full object-cover"
             loading="lazy"
           />
-
           {showDiscountBadge && (
             <div className="absolute top-2 left-2 text-xs font-semibold bg-green-400 text-black px-2 py-1 rounded-md">
               -{discountPct}%
@@ -504,12 +473,10 @@ function Pagination({
   if (pageCount <= 1) return null;
 
   const clampLocal = (p: number) => Math.min(pageCount, Math.max(1, p));
-
   const windowSize = 2;
   const pages: (number | "…")[] = [];
 
   const add = (v: number | "…") => pages.push(v);
-
   const start = Math.max(2, page - windowSize);
   const end = Math.min(pageCount - 1, page + windowSize);
 
@@ -524,11 +491,7 @@ function Pagination({
       <button
         onClick={() => onPageChange(clampLocal(page - 1))}
         disabled={page <= 1}
-        className="
-          px-3 py-2 rounded-md border border-gray-700 bg-gray-900
-          disabled:opacity-40 disabled:cursor-not-allowed
-          hover:border-gray-500 transition
-        "
+        className="px-3 py-2 rounded-md border border-gray-700 bg-gray-900 disabled:opacity-40 disabled:cursor-not-allowed hover:border-gray-500 transition"
       >
         Prev
       </button>
@@ -556,11 +519,7 @@ function Pagination({
       <button
         onClick={() => onPageChange(clampLocal(page + 1))}
         disabled={page >= pageCount}
-        className="
-          px-3 py-2 rounded-md border border-gray-700 bg-gray-900
-          disabled:opacity-40 disabled:cursor-not-allowed
-          hover:border-gray-500 transition
-        "
+        className="px-3 py-2 rounded-md border border-gray-700 bg-gray-900 disabled:opacity-40 disabled:cursor-not-allowed hover:border-gray-500 transition"
       >
         Next
       </button>

@@ -12,11 +12,14 @@ import {
   legoSearchUrl,
   legoAffiliateUrlFromProductPage,
 } from "@/lib/affiliate";
-
-type Retailer = "LEGO" | "Amazon" | "Walmart" | "Target";
+import { parsePriceToCents } from "@/lib/utils";
+import type { Retailer } from "@prisma/client";
 
 // Helper to build affiliate deep link via our API
-async function buildAffiliateUrl(merchantId: string, destinationUrl: string): Promise<string | null> {
+async function buildAffiliateUrl(
+  merchantId: string,
+  destinationUrl: string
+): Promise<string | null> {
   try {
     const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/rakuten/link`, {
       method: "POST",
@@ -31,68 +34,61 @@ async function buildAffiliateUrl(merchantId: string, destinationUrl: string): Pr
   }
 }
 
-function dollarsToCents(msrp?: string | number | null): number | null {
-  if (msrp == null) return null;
-  if (typeof msrp === "number") return Math.round(msrp * 100);
-  const cleaned = String(msrp).replace(/[^0-9.]/g, "");
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  if (Number.isNaN(n)) return null;
-  return Math.round(n * 100);
-}
-
 export async function POST(req: Request) {
-  const secret = process.env.SEED_SECRET;
-  if (!secret) {
-    return NextResponse.json({ error: "SEED_SECRET not set" }, { status: 500 });
-  }
+  // ✅ Allow unauthenticated access in dev mode
+  if (process.env.NODE_ENV === "production") {
+    const secret = process.env.SEED_SECRET;
+    if (!secret) {
+      return NextResponse.json({ error: "SEED_SECRET not set" }, { status: 500 });
+    }
 
-  const auth = req.headers.get("authorization") || "";
-  if (auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const auth = req.headers.get("authorization") || "";
+    if (auth !== `Bearer ${secret}`) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   const merchantId = process.env.RAKUTEN_ADVERTISER_ID;
   if (!merchantId) {
-    console.warn("Warning: RAKUTEN_ADVERTISER_ID not set — LEGO links may not be tracked.");
+    console.warn("⚠️ RAKUTEN_ADVERTISER_ID not set — LEGO links may not be tracked.");
   }
 
   for (const s of SETS as any[]) {
     const setId = String(s.setId);
     const imageUrl = String(s.imageUrl);
-    const msrp = dollarsToCents(s.msrp);
+    const msrpCents = parsePriceToCents(s.msrp);
 
     const legoUrlStored =
-      typeof s.legoUrl === "string" && s.legoUrl.trim().length ? s.legoUrl.trim() : null;
+      typeof s.legoUrl === "string" && s.legoUrl.trim().length
+        ? s.legoUrl.trim()
+        : null;
 
-    // 1) Upsert Set (includes legoUrl)
+    // 1) Upsert Set
     await prisma.set.upsert({
       where: { setId },
       update: {
         name: s.name ?? null,
         imageUrl,
-        msrp,
+        msrp: msrpCents,
         legoUrl: legoUrlStored,
       },
       create: {
         setId,
         name: s.name ?? null,
         imageUrl,
-        msrp,
+        msrp: msrpCents,
         legoUrl: legoUrlStored,
       },
     });
 
-    // 2) Build affiliate LEGO URL
+    // 2) Build LEGO affiliate link
     const destinationUrl = legoUrlStored ?? legoSearchUrl(setId);
-
-    // Try using canonical affiliate link via Rakuten API
     let legoAffiliateUrl: string | null = null;
+
     if (merchantId && destinationUrl) {
       legoAffiliateUrl = await buildAffiliateUrl(merchantId, destinationUrl);
     }
 
-    // If that failed, fall back to rakutenOfferId
     if (!legoAffiliateUrl) {
       const offerId =
         typeof s.rakutenOfferId === "string" && s.rakutenOfferId.trim().length
@@ -106,9 +102,9 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3) Upsert Offers
+    // 3) Upsert Offers + Conditional PriceHistory insert
     const offers: { retailer: Retailer; url: string; price: number | null }[] = [
-      { retailer: "LEGO", url: legoAffiliateUrl!, price: msrp },
+      { retailer: "LEGO", url: legoAffiliateUrl!, price: msrpCents },
       { retailer: "Amazon", url: amazonSearchUrl(setId), price: null },
       { retailer: "Walmart", url: walmartSearchUrl(setId), price: null },
       { retailer: "Target", url: targetSearchUrl(setId), price: null },
@@ -116,7 +112,12 @@ export async function POST(req: Request) {
 
     for (const o of offers) {
       await prisma.offer.upsert({
-        where: { setIdRef_retailer: { setIdRef: setId, retailer: o.retailer } },
+        where: {
+          setIdRef_retailer: {
+            setIdRef: setId,
+            retailer: o.retailer,
+          },
+        },
         update: {
           url: o.url,
           price: o.price,
@@ -131,6 +132,26 @@ export async function POST(req: Request) {
           inStock: true,
         },
       });
+
+      // ✅ Insert into PriceHistory if price/inStock changed
+      const lastHistory = await prisma.priceHistory.findFirst({
+        where: { setIdRef: setId, retailer: o.retailer },
+        orderBy: { recordedAt: "desc" },
+      });
+
+      const changed =
+        lastHistory?.price !== o.price || lastHistory?.inStock !== true;
+
+      if (changed) {
+        await prisma.priceHistory.create({
+          data: {
+            setIdRef: setId,
+            retailer: o.retailer,
+            price: o.price,
+            inStock: true,
+          },
+        });
+      }
     }
   }
 

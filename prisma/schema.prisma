@@ -1,6 +1,6 @@
 generator client {
   provider   = "prisma-client-js"
-  engineType = "binary"
+  engineType = "library" // ✅ required for adapter usage
 }
 
 datasource db {
@@ -15,21 +15,22 @@ enum Retailer {
 }
 
 model Set {
-  id               String   @id @default(cuid())
-  setId            String   @unique
+  id               String    @id @default(cuid())
+  setId            String    @unique
   name             String?
   imageUrl         String
   msrp             Int?
   legoUrl          String?
-  canonicalUrl     String?  // <-- add this
-  rakutenProductId String?  // <-- optional: already in your code
-  advertiserId     String?  // <-- optional: already in your code
-  lastSyncedAt     DateTime? // <-- optional: already in your code
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  canonicalUrl     String?
+  rakutenProductId String?
+  advertiserId     String?
+  lastSyncedAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  offers Offer[]
-  clicks Click[]
+  offers       Offer[]
+  clicks       Click[]
+  priceHistory PriceHistory[] @relation("SetPriceHistoryBySetId") // ✅ match below
 }
 
 model Offer {
@@ -57,5 +58,18 @@ model Click {
   set Set @relation(fields: [setIdRef], references: [setId], onDelete: Cascade)
 
   @@unique([setIdRef, retailer])
+  @@index([setIdRef])
+}
+
+model PriceHistory {
+  id         String   @id @default(cuid())
+  setIdRef   String
+  retailer   String
+  price      Int?
+  inStock    Boolean?
+  recordedAt DateTime @default(now())
+
+  set Set @relation("SetPriceHistoryBySetId", fields: [setIdRef], references: [setId], onDelete: Cascade)
+
   @@index([setIdRef])
 }

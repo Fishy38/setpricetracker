@@ -1,4 +1,3 @@
-// lib/lego.ts
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari";
 
@@ -6,15 +5,51 @@ function pickFirst<T>(arr: T[] | undefined | null) {
   return Array.isArray(arr) && arr.length ? arr[0] : null;
 }
 
+// Retry fetch with timeout and exponential backoff
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  retries = 3,
+  timeoutMs = 8000
+): Promise<Response> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) return res;
+
+      console.warn(`[LEGO fetch] Attempt ${attempt} failed: ${res.status}`);
+    } catch (err) {
+      clearTimeout(timeout);
+      if (attempt === retries) throw err;
+      console.warn(`[LEGO fetch] Attempt ${attempt} error:`, err);
+    }
+
+    // Exponential backoff: wait before retrying
+    await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 300));
+  }
+
+  throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
+}
+
 // 1) Resolve a setId -> product page URL by scraping LEGO search results
 export async function resolveLegoProductUrl(setId: string) {
   const searchUrl = `https://www.lego.com/en-us/search?q=${encodeURIComponent(setId)}`;
 
-  const res = await fetch(searchUrl, {
-    headers: { "user-agent": UA, "accept-language": "en-US,en;q=0.9" },
+  const res = await fetchWithRetry(searchUrl, {
+    headers: {
+      "user-agent": UA,
+      "accept-language": "en-US,en;q=0.9",
+    },
     cache: "no-store",
   });
-  if (!res.ok) return null;
 
   const html = await res.text();
 
@@ -28,11 +63,13 @@ export async function resolveLegoProductUrl(setId: string) {
 
 // 2) Scrape product page and extract price (best-effort)
 export async function scrapeLegoPriceCents(productUrl: string) {
-  const res = await fetch(productUrl, {
-    headers: { "user-agent": UA, "accept-language": "en-US,en;q=0.9" },
+  const res = await fetchWithRetry(productUrl, {
+    headers: {
+      "user-agent": UA,
+      "accept-language": "en-US,en;q=0.9",
+    },
     cache: "no-store",
   });
-  if (!res.ok) return null;
 
   const html = await res.text();
 

@@ -1,5 +1,5 @@
-// app/set/[setId]/page.tsx
 import Link from "next/link";
+import { PriceChart } from "@/components/PriceChart";
 import { prisma } from "@/lib/prisma";
 import { SETS } from "@/lib/sets";
 
@@ -16,18 +16,30 @@ function sortOffersByPrice(offers: any[]) {
     const ap = a?.price ?? null;
     const bp = b?.price ?? null;
     if (ap == null && bp == null) return 0;
-    if (ap == null) return 1; // nulls last
+    if (ap == null) return 1;
     if (bp == null) return -1;
-    return ap - bp; // lowest first
+    return ap - bp;
   });
 }
 
-export default async function SetPage({
-  params,
-}: {
-  params: Promise<{ setId: string }>;
-}) {
-  const { setId } = await params;
+type PageProps = {
+  params: Promise<{
+    setId: string;
+  }> | {
+    setId: string;
+  };
+};
+
+export default async function SetPage({ params }: PageProps) {
+  // ✅ Await params in case it's a Promise (App Router edge case)
+  const resolvedParams = await params;
+  const setId = resolvedParams?.setId;
+
+  if (!setId) {
+    throw new Error("❌ Missing setId in route params");
+  }
+
+  console.log("✅ setId from route:", setId);
 
   const dbSet = await prisma.set.findUnique({
     where: { setId },
@@ -48,12 +60,15 @@ export default async function SetPage({
     );
   }
 
-  const offersSorted = sortOffersByPrice(((set as any)?.offers ?? []) as any[]);
+  const offersSorted = sortOffersByPrice((set as any).offers ?? []);
+  const offersToShow = offersSorted.filter((o: any) => !!o?.url && o?.price != null);
 
-  // ✅ Hide retailers that don't have price data (and still require URL)
-  const offersToShow = offersSorted.filter(
-    (o: any) => !!o?.url && o?.price != null
+  const historyRes = await fetch(
+    `${process.env.NEXT_PUBLIC_SITE_URL}/api/sets/${setId}/price-history`,
+    { cache: "no-store" }
   );
+  const historyData = await historyRes.json();
+  const priceHistory = historyData?.history ?? [];
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center px-6 py-12">
@@ -72,9 +87,7 @@ export default async function SetPage({
             className="w-full aspect-square object-cover rounded-md border border-gray-800 bg-black"
           />
           <div className="mt-4">
-            <div className="text-xs uppercase tracking-wide text-gray-500">
-              Set
-            </div>
+            <div className="text-xs uppercase tracking-wide text-gray-500">Set</div>
             <div className="text-3xl font-bold">{(set as any).setId}</div>
             {(set as any).name && (
               <div className="text-gray-400 mt-1">{(set as any).name}</div>
@@ -87,17 +100,13 @@ export default async function SetPage({
           <h2 className="text-xl font-semibold mb-3">Retailers</h2>
 
           {offersToShow.length === 0 ? (
-            <div className="text-sm text-gray-400">
-              No live prices yet for this set.
-            </div>
+            <div className="text-sm text-gray-400">No live prices yet for this set.</div>
           ) : (
             <div className="space-y-3">
               {offersToShow.map((o: any, idx: number) => (
                 <a
                   key={`${o.retailer}-${idx}`}
-                  href={`/out?u=${encodeURIComponent(
-                    o.url
-                  )}&setId=${encodeURIComponent(
+                  href={`/out?u=${encodeURIComponent(o.url)}&setId=${encodeURIComponent(
                     (set as any).setId
                   )}&retailer=${encodeURIComponent(o.retailer)}`}
                   target="_blank"
@@ -115,19 +124,27 @@ export default async function SetPage({
                         {formatCents((set as any).msrp)}
                       </span>
                     )}
-                    <span className="text-green-400 font-semibold">
-                      {formatCents(o.price)}
-                    </span>
+                    <span className="text-green-400 font-semibold">{formatCents(o.price)}</span>
                   </div>
                 </a>
               ))}
             </div>
           )}
 
-          <p className="text-xs text-gray-500 mt-4">
-            Links go through /out for tracking (beta).
-          </p>
+          <p className="text-xs text-gray-500 mt-4">Links go through /out for tracking (beta).</p>
         </div>
+      </section>
+
+      {/* ✅ Price history chart */}
+      <section className="w-full max-w-5xl mt-12">
+        <h2 className="text-xl font-semibold mb-4">Price History</h2>
+        {priceHistory.length > 0 ? (
+          <div className="bg-zinc-900 border border-gray-800 rounded-md p-4">
+            <PriceChart history={priceHistory} />
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No price history available.</p>
+        )}
       </section>
     </main>
   );

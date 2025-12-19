@@ -1,18 +1,10 @@
 // app/api/refresh/lego-all/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+import { parsePriceToCents } from "@/lib/utils";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-function parsePriceToCents(raw: unknown): number | null {
-  if (raw == null) return null;
-  const cleaned = String(raw).trim().replace(/[^0-9.]/g, "");
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  if (Number.isNaN(n)) return null;
-  return Math.round(n * 100);
-}
 
 function extractJsonLd(html: string): any[] {
   const out: any[] = [];
@@ -107,11 +99,29 @@ async function refreshOne(setId: string) {
     create: {
       setIdRef: setId,
       retailer: "LEGO",
-      url: set.legoUrl, // fallback if offer row didn't exist yet
+      url: set.legoUrl,
       price: priceCents,
       inStock: inStock ?? true,
     },
   });
+  
+  const last = await prisma.priceHistory.findFirst({
+    where: { setIdRef: setId, retailer: "LEGO" },
+    orderBy: { recordedAt: "desc" },
+  });
+  
+  const changed = last?.price !== priceCents || last?.inStock !== inStock;
+  
+  if (changed) {
+    await prisma.priceHistory.create({
+      data: {
+        setIdRef: setId,
+        retailer: "LEGO",
+        price: priceCents,
+        inStock,
+      },
+    });
+  }
 
   return {
     setId,

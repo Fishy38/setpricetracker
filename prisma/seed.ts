@@ -8,63 +8,52 @@ import {
   legoAffiliateUrlFromProductPage,
 } from "../lib/affiliate";
 
-type Retailer = "LEGO" | "Amazon" | "Walmart" | "Target";
-
-function dollarsToCents(msrp?: string | number | null) {
-  if (msrp == null) return null;
-  if (typeof msrp === "number") return Math.round(msrp * 100);
-
-  // if msrp is string like "$199.99" or "199.99"
-  const cleaned = String(msrp).replace(/[^0-9.]/g, "");
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  if (Number.isNaN(n)) return null;
-  return Math.round(n * 100);
-}
+import { parsePriceToCents } from "../lib/utils";
+import type { Retailer } from "@prisma/client";
 
 async function main() {
   for (const s of SETS as any[]) {
-    // Expecting at minimum: { setId, imageUrl, name?, msrp? }
-    // Optional (for product-page affiliate links):
-    // - s.legoUrl (exact product page URL)
-    // - s.rakutenOfferId (offerid from Rakuten "Copy link code")
+    const setId = String(s.setId);
+    const imageUrl = String(s.imageUrl);
+    const msrpCents = parsePriceToCents(s.msrp);
+
+    // 1) Upsert Set
     await prisma.set.upsert({
-      where: { setId: s.setId },
+      where: { setId },
       update: {
         name: s.name ?? null,
-        imageUrl: s.imageUrl,
-        msrp: dollarsToCents(s.msrp),
+        imageUrl,
+        msrp: msrpCents,
       },
       create: {
-        setId: s.setId,
+        setId,
         name: s.name ?? null,
-        imageUrl: s.imageUrl,
-        msrp: dollarsToCents(s.msrp),
+        imageUrl,
+        msrp: msrpCents,
       },
     });
 
+    // 2) Build affiliate LEGO link
     const legoUrl = legoAffiliateUrlFromProductPage({
-      setId: s.setId,
-      destinationUrl: s.legoUrl, // preferred: exact product page
-      offerId: s.rakutenOfferId, // required for Rakuten "link" format affiliate URL
+      setId,
+      destinationUrl: s.legoUrl,
+      offerId: s.rakutenOfferId,
     });
 
+    // 3) Offers for all retailers
     const offers: { retailer: Retailer; url: string; price: number | null }[] = [
-      {
-        retailer: "LEGO",
-        url: legoUrl,
-        price: dollarsToCents(s.msrp), // placeholder (MSRP)
-      },
-      { retailer: "Amazon", url: amazonSearchUrl(s.setId), price: null },
-      { retailer: "Walmart", url: walmartSearchUrl(s.setId), price: null },
-      { retailer: "Target", url: targetSearchUrl(s.setId), price: null },
+      { retailer: "LEGO", url: legoUrl, price: msrpCents },
+      { retailer: "Amazon", url: amazonSearchUrl(setId), price: null },
+      { retailer: "Walmart", url: walmartSearchUrl(setId), price: null },
+      { retailer: "Target", url: targetSearchUrl(setId), price: null },
     ];
 
     for (const o of offers) {
+      // Upsert offer row
       await prisma.offer.upsert({
         where: {
           setIdRef_retailer: {
-            setIdRef: s.setId, // references Set.setId (LEGO number)
+            setIdRef: setId,
             retailer: o.retailer,
           },
         },
@@ -75,22 +64,41 @@ async function main() {
           updatedAt: new Date(),
         },
         create: {
-          setIdRef: s.setId,
+          setIdRef: setId,
           retailer: o.retailer,
           url: o.url,
           price: o.price,
           inStock: true,
         },
       });
+
+      // Conditionally insert into price history
+      const last = await prisma.priceHistory.findFirst({
+        where: { setIdRef: setId, retailer: o.retailer },
+        orderBy: { recordedAt: "desc" },
+      });
+
+      const changed = last?.price !== o.price || last?.inStock !== true;
+
+      if (changed) {
+        await prisma.priceHistory.create({
+          data: {
+            setIdRef: setId,
+            retailer: o.retailer,
+            price: o.price,
+            inStock: true,
+          },
+        });
+      }
     }
   }
 
-  console.log(`Seeded ${SETS.length} sets + offers`);
+  console.log(`✅ Seeded ${SETS.length} sets + offers`);
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("❌ Seed failed", e);
     process.exit(1);
   })
   .finally(async () => {
