@@ -1,34 +1,111 @@
 "use client";
+
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { SETS as FALLBACK_SETS } from "../lib/sets";
 
-type Offer = {
+/**
+ * DB/API shape (from /api/sets):
+ * - msrp: number | null  (cents)
+ * - offers[].price: number | null (cents)
+ */
+type ApiOffer = {
   retailer: string;
-  price: string;
-  affiliateUrl?: string;
+  price: number | null;
+  url?: string | null;
+  inStock?: boolean | null;
+  updatedAt?: string | Date;
 };
 
-type SetRow = {
+type ApiSetRow = {
+  setId: string;
+  name?: string | null;
+  imageUrl: string;
+  msrp?: number | null;
+  offers: ApiOffer[];
+};
+
+/**
+ * Fallback set shape (from lib/sets) can be "stringy".
+ * We'll normalize both sources into a single UI shape.
+ */
+type UiOffer = {
+  retailer: string;
+  priceCents: number | null;
+};
+
+type UiSetRow = {
   setId: string;
   imageUrl: string;
-  msrp?: string | null;
-  offers: Offer[];
+  msrpCents: number | null;
+  offers: UiOffer[];
 };
+
+function money(cents?: number | null) {
+  if (cents == null) return "—";
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+function parseToCents(v: unknown): number | null {
+  if (v == null) return null;
+
+  if (typeof v === "number") {
+    // assume already cents if it's an integer; otherwise treat as dollars
+    if (Number.isInteger(v)) return v;
+    return Math.round(v * 100);
+  }
+
+  if (typeof v === "string") {
+    const cleaned = v.replace(/[^0-9.]/g, "");
+    if (!cleaned) return null;
+    const n = Number(cleaned);
+    if (Number.isNaN(n)) return null;
+    // if string looks like dollars (has a dot or small number), convert to cents
+    if (cleaned.includes(".") || n < 1000) return Math.round(n * 100);
+    // else treat as cents-ish
+    return Math.round(n);
+  }
+
+  return null;
+}
+
+function normalizeSets(input: any[]): UiSetRow[] {
+  return (input ?? []).map((s) => {
+    const msrpCents = parseToCents(s.msrp);
+
+    const offers: UiOffer[] = (s.offers ?? []).map((o: any) => ({
+      retailer: String(o.retailer ?? "Unknown"),
+      priceCents: parseToCents(o.price),
+    }));
+
+    return {
+      setId: String(s.setId),
+      imageUrl: String(s.imageUrl),
+      msrpCents,
+      offers,
+    };
+  });
+}
 
 export default function Home() {
   const router = useRouter();
   const [q, setQ] = useState("");
-  const [sets, setSets] = useState<SetRow[]>(FALLBACK_SETS as any);
+
+  // Start with fallback, normalized
+  const [sets, setSets] = useState<UiSetRow[]>(
+    normalizeSets(FALLBACK_SETS as any)
+  );
 
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch("/api/sets", { cache: "no-store" });
         if (!res.ok) return;
-        const data = (await res.json()) as SetRow[];
-        if (Array.isArray(data) && data.length) setSets(data);
+        const data = (await res.json()) as ApiSetRow[];
+        if (Array.isArray(data) && data.length) {
+          setSets(normalizeSets(data as any));
+        }
       } catch {
         // keep fallback
       }
@@ -55,52 +132,53 @@ export default function Home() {
 
       {/* Search */}
       <section className="w-full max-w-xl mb-10">
-  <div className="flex gap-2">
-    <input
-      value={q}
-      onChange={(e) => setQ(e.target.value)}
-      onKeyDown={(e) => e.key === "Enter" && go()}
-      type="text"
-      placeholder="Enter LEGO set number (e.g. 75394)"
-      className="
-        flex-1
-        rounded-md
-        px-4
-        py-3
-        bg-gray-900
-        text-white
-        placeholder-gray-400
-        border
-        border-gray-700
-        focus:outline-none
-        focus:ring-2
-        focus:ring-green-400
-        focus:border-green-400
-      "
-    />
-    <button
-      onClick={go}
-      className="
-        px-4
-        py-3
-        rounded-md
-        bg-green-400
-        text-black
-        font-semibold
-        hover:bg-green-300
-        transition
-      "
-    >
-      Go
-    </button>
-  </div>
-</section>
+        <div className="flex gap-2">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && go()}
+            type="text"
+            placeholder="Enter LEGO set number (e.g. 75394)"
+            className="
+              flex-1
+              rounded-md
+              px-4
+              py-3
+              bg-gray-900
+              text-white
+              placeholder-gray-400
+              border
+              border-gray-700
+              focus:outline-none
+              focus:ring-2
+              focus:ring-green-400
+              focus:border-green-400
+            "
+          />
+          <button
+            onClick={go}
+            className="
+              px-4
+              py-3
+              rounded-md
+              bg-green-400
+              text-black
+              font-semibold
+              hover:bg-green-300
+              transition
+            "
+          >
+            Go
+          </button>
+        </div>
+      </section>
 
       {/* Grid */}
       <section className="w-full max-w-6xl grid grid-cols-4 gap-4">
-        {setList.map((set: any) => {
+        {setList.map((set) => {
+          // pick first offer with a real price, else fall back to first offer
           const featured =
-            set.offers?.find((o: any) => o.price && o.price !== "—") ?? set.offers?.[0];
+            set.offers.find((o) => o.priceCents != null) ?? set.offers[0];
 
           return (
             <PriceCard
@@ -108,8 +186,8 @@ export default function Home() {
               setId={set.setId}
               imageUrl={set.imageUrl}
               store={featured?.retailer ?? "Unknown"}
-              price={featured?.price ?? "—"}
-              msrp={set.msrp ?? undefined}
+              priceCents={featured?.priceCents ?? null}
+              msrpCents={set.msrpCents}
             />
           );
         })}
@@ -130,14 +208,14 @@ function PriceCard({
   setId,
   imageUrl,
   store,
-  price,
-  msrp,
+  priceCents,
+  msrpCents,
 }: {
   setId: string;
   imageUrl: string;
   store: string;
-  price: string;
-  msrp?: string;
+  priceCents: number | null;
+  msrpCents: number | null;
 }) {
   return (
     <Link href={`/set/${setId}`} className="w-full">
@@ -160,8 +238,14 @@ function PriceCard({
         <div className="font-medium mb-1">{store}</div>
 
         <div className="flex items-end gap-2">
-          {msrp && <span className="text-xs text-gray-500 line-through">{msrp}</span>}
-          <span className="text-green-400 font-semibold">{price}</span>
+          {msrpCents != null && (
+            <span className="text-xs text-gray-500 line-through">
+              {money(msrpCents)}
+            </span>
+          )}
+          <span className="text-green-400 font-semibold">
+            {money(priceCents)}
+          </span>
         </div>
       </div>
     </Link>
