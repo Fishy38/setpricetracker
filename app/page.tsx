@@ -1,3 +1,4 @@
+// app/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -5,14 +6,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { SETS as FALLBACK_SETS } from "../lib/sets";
 
-/**
- * DB/API shape (from /api/sets):
- * - msrp: number | null  (cents)
- * - offers[].price: number | null (cents)
- */
 type ApiOffer = {
   retailer: string;
-  price: number | null;
+  price: number | null; // cents
   url?: string | null;
   inStock?: boolean | null;
   updatedAt?: string | Date;
@@ -22,14 +18,11 @@ type ApiSetRow = {
   setId: string;
   name?: string | null;
   imageUrl: string;
-  msrp?: number | null;
+  msrp?: number | null; // cents
+  bestOffer?: ApiOffer | null; // ✅ NEW
   offers: ApiOffer[];
 };
 
-/**
- * Fallback set shape (from lib/sets) can be "stringy".
- * We'll normalize both sources into a single UI shape.
- */
 type UiOffer = {
   retailer: string;
   priceCents: number | null;
@@ -39,7 +32,7 @@ type UiSetRow = {
   setId: string;
   imageUrl: string;
   msrpCents: number | null;
-  offers: UiOffer[];
+  bestOffer: UiOffer | null; // ✅ NEW
 };
 
 function money(cents?: number | null) {
@@ -51,9 +44,8 @@ function parseToCents(v: unknown): number | null {
   if (v == null) return null;
 
   if (typeof v === "number") {
-    // assume already cents if it's an integer; otherwise treat as dollars
-    if (Number.isInteger(v)) return v;
-    return Math.round(v * 100);
+    if (Number.isInteger(v)) return v; // assume cents
+    return Math.round(v * 100); // dollars -> cents
   }
 
   if (typeof v === "string") {
@@ -61,10 +53,8 @@ function parseToCents(v: unknown): number | null {
     if (!cleaned) return null;
     const n = Number(cleaned);
     if (Number.isNaN(n)) return null;
-    // if string looks like dollars (has a dot or small number), convert to cents
-    if (cleaned.includes(".") || n < 1000) return Math.round(n * 100);
-    // else treat as cents-ish
-    return Math.round(n);
+    if (cleaned.includes(".") || n < 1000) return Math.round(n * 100); // dollars-ish
+    return Math.round(n); // cents-ish
   }
 
   return null;
@@ -74,16 +64,24 @@ function normalizeSets(input: any[]): UiSetRow[] {
   return (input ?? []).map((s) => {
     const msrpCents = parseToCents(s.msrp);
 
-    const offers: UiOffer[] = (s.offers ?? []).map((o: any) => ({
-      retailer: String(o.retailer ?? "Unknown"),
-      priceCents: parseToCents(o.price),
-    }));
+    const bo =
+      s.bestOffer ??
+      (s.offers ?? []).find((o: any) => o?.price != null) ??
+      (s.offers ?? [])[0] ??
+      null;
+
+    const bestOffer: UiOffer | null = bo
+      ? {
+          retailer: String(bo.retailer ?? "Unknown"),
+          priceCents: parseToCents(bo.price),
+        }
+      : null;
 
     return {
       setId: String(s.setId),
       imageUrl: String(s.imageUrl),
       msrpCents,
-      offers,
+      bestOffer,
     };
   });
 }
@@ -92,7 +90,6 @@ export default function Home() {
   const router = useRouter();
   const [q, setQ] = useState("");
 
-  // Start with fallback, normalized
   const [sets, setSets] = useState<UiSetRow[]>(
     normalizeSets(FALLBACK_SETS as any)
   );
@@ -103,9 +100,7 @@ export default function Home() {
         const res = await fetch("/api/sets", { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as ApiSetRow[];
-        if (Array.isArray(data) && data.length) {
-          setSets(normalizeSets(data as any));
-        }
+        if (Array.isArray(data) && data.length) setSets(normalizeSets(data as any));
       } catch {
         // keep fallback
       }
@@ -122,7 +117,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center px-6 py-12">
-      {/* Header */}
       <header className="mb-12 text-center">
         <h1 className="text-4xl font-bold mb-3">SetPriceTracker</h1>
         <p className="text-gray-400 max-w-xl">
@@ -130,7 +124,6 @@ export default function Home() {
         </p>
       </header>
 
-      {/* Search */}
       <section className="w-full max-w-xl mb-10">
         <div className="flex gap-2">
           <input
@@ -140,32 +133,18 @@ export default function Home() {
             type="text"
             placeholder="Enter LEGO set number (e.g. 75394)"
             className="
-              flex-1
-              rounded-md
-              px-4
-              py-3
-              bg-gray-900
-              text-white
-              placeholder-gray-400
-              border
-              border-gray-700
-              focus:outline-none
-              focus:ring-2
-              focus:ring-green-400
-              focus:border-green-400
+              flex-1 rounded-md px-4 py-3
+              bg-gray-900 text-white placeholder-gray-400
+              border border-gray-700
+              focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400
             "
           />
           <button
             onClick={go}
             className="
-              px-4
-              py-3
-              rounded-md
-              bg-green-400
-              text-black
-              font-semibold
-              hover:bg-green-300
-              transition
+              px-4 py-3 rounded-md
+              bg-green-400 text-black font-semibold
+              hover:bg-green-300 transition
             "
           >
             Go
@@ -173,31 +152,21 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Grid */}
       <section className="w-full max-w-6xl grid grid-cols-4 gap-4">
-        {setList.map((set) => {
-          // pick first offer with a real price, else fall back to first offer
-          const featured =
-            set.offers.find((o) => o.priceCents != null) ?? set.offers[0];
-
-          return (
-            <PriceCard
-              key={set.setId}
-              setId={set.setId}
-              imageUrl={set.imageUrl}
-              store={featured?.retailer ?? "Unknown"}
-              priceCents={featured?.priceCents ?? null}
-              msrpCents={set.msrpCents}
-            />
-          );
-        })}
+        {setList.map((set) => (
+          <PriceCard
+            key={set.setId}
+            setId={set.setId}
+            imageUrl={set.imageUrl}
+            store={set.bestOffer?.retailer ?? "Unknown"}
+            priceCents={set.bestOffer?.priceCents ?? null}
+            msrpCents={set.msrpCents}
+          />
+        ))}
       </section>
 
-      {/* Footer */}
       <footer className="mt-16 text-sm text-gray-500 text-center">
-        <p className="mb-2">
-          As an Amazon Associate, we earn from qualifying purchases.
-        </p>
+        <p className="mb-2">As an Amazon Associate, we earn from qualifying purchases.</p>
         <p>© {new Date().getFullYear()} SetPriceTracker</p>
       </footer>
     </main>
@@ -221,17 +190,11 @@ function PriceCard({
     <Link href={`/set/${setId}`} className="w-full">
       <div className="border border-gray-800 rounded-md p-3 hover:border-gray-600 hover:bg-gray-900 transition cursor-pointer">
         <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-black">
-          <img
-            src={imageUrl}
-            alt={`LEGO set ${setId}`}
-            className="w-full h-full object-cover"
-          />
+          <img src={imageUrl} alt={`LEGO set ${setId}`} className="w-full h-full object-cover" />
         </div>
 
         <div className="flex items-baseline gap-1 mb-1">
-          <span className="text-xs uppercase tracking-wide text-gray-500">
-            Set
-          </span>
+          <span className="text-xs uppercase tracking-wide text-gray-500">Set</span>
           <span className="text-gray-300 font-semibold">{setId}</span>
         </div>
 
@@ -239,13 +202,9 @@ function PriceCard({
 
         <div className="flex items-end gap-2">
           {msrpCents != null && (
-            <span className="text-xs text-gray-500 line-through">
-              {money(msrpCents)}
-            </span>
+            <span className="text-xs text-gray-500 line-through">{money(msrpCents)}</span>
           )}
-          <span className="text-green-400 font-semibold">
-            {money(priceCents)}
-          </span>
+          <span className="text-green-400 font-semibold">{money(priceCents)}</span>
         </div>
       </div>
     </Link>

@@ -19,7 +19,8 @@ model Set {
   setId     String   @unique
   name      String?
   imageUrl  String
-  msrp      Int? // store cents or whole dollars—pick one & be consistent
+  msrp      Int? // cents
+  legoUrl   String? 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -31,7 +32,7 @@ model Offer {
   id        String   @id @default(cuid())
   setIdRef  String
   retailer  String
-  price     Int? // same unit as msrp (recommended: cents)
+  price     Int? // cents
   url       String?
   inStock   Boolean? @default(true)
   updatedAt DateTime @default(now())
