@@ -1,14 +1,41 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { SETS } from "../lib/sets";
+import { useEffect, useMemo, useState } from "react";
+import { SETS as FALLBACK_SETS } from "../lib/sets";
+
+type Offer = {
+  retailer: string;
+  price: string;
+  affiliateUrl?: string;
+};
+
+type SetRow = {
+  setId: string;
+  imageUrl: string;
+  msrp?: string | null;
+  offers: Offer[];
+};
 
 export default function Home() {
   const router = useRouter();
   const [q, setQ] = useState("");
+  const [sets, setSets] = useState<SetRow[]>(FALLBACK_SETS as any);
 
-  const setList = SETS;
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/sets", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as SetRow[];
+        if (Array.isArray(data) && data.length) setSets(data);
+      } catch {
+        // keep fallback
+      }
+    })();
+  }, []);
+
+  const setList = useMemo(() => sets, [sets]);
 
   function go() {
     const id = q.trim();
@@ -71,9 +98,9 @@ export default function Home() {
 
       {/* Grid */}
       <section className="w-full max-w-6xl grid grid-cols-4 gap-4">
-        {setList.map((set) => {
+        {setList.map((set: any) => {
           const featured =
-            set.offers.find((o) => o.price && o.price !== "—") ?? set.offers[0];
+            set.offers?.find((o: any) => o.price && o.price !== "—") ?? set.offers?.[0];
 
           return (
             <PriceCard
@@ -82,7 +109,7 @@ export default function Home() {
               imageUrl={set.imageUrl}
               store={featured?.retailer ?? "Unknown"}
               price={featured?.price ?? "—"}
-              msrp={set.msrp}
+              msrp={set.msrp ?? undefined}
             />
           );
         })}

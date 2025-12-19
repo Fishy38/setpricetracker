@@ -1,36 +1,30 @@
-"use client";
+// app/set/[setId]/page.tsx
+export const runtime = "nodejs";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { SETS } from "../../../lib/sets";
+import { prisma } from "@/lib/prisma";
+import { SETS } from "@/lib/sets";
 
-export default function SetPage() {
-  const params = useParams();
-  const setIdRaw = params?.setId;
-  const setId = Array.isArray(setIdRaw)
-    ? setIdRaw[0]
-    : (setIdRaw as string | undefined);
+function formatCents(cents: number | null | undefined) {
+  if (cents == null) return "—";
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
-  const set = SETS.find((s) => s.setId === setId);
+export default async function SetPage({
+  params,
+}: {
+  params: Promise<{ setId: string }>;
+}) {
+  const { setId } = await params;
 
-  // ✅ click counts (hidden from UI, used internally)
-  const [clicks, setClicks] = useState<Record<string, number>>({});
+  const dbSet = await prisma.set.findUnique({
+    where: { setId },
+    include: { offers: true },
+  });
 
-  useEffect(() => {
-    if (!set?.setId) return;
+  const set = dbSet ?? SETS.find((s) => s.setId === setId) ?? null;
 
-    fetch(`/api/clicks?setId=${encodeURIComponent(set.setId)}`)
-      .then((r) => r.json())
-      .then((data) => setClicks(data ?? {}))
-      .catch(() => setClicks({}));
-  }, [set?.setId]);
-
-  // still available for future use
-  const getCount = (retailer: string) =>
-    clicks[`${set?.setId}::${retailer}`] ?? 0;
-
-  if (!setId || !set) {
+  if (!set) {
     return (
       <main className="min-h-screen bg-black text-white flex flex-col items-center px-6 py-12">
         <h1 className="text-3xl font-bold mb-2">Set not found</h1>
@@ -54,15 +48,16 @@ export default function SetPage() {
         {/* Left */}
         <div className="border border-gray-800 rounded-md p-4">
           <img
-            src={set.imageUrl}
-            alt={`LEGO set ${set.setId}`}
+            src={(set as any).imageUrl}
+            alt={`LEGO set ${(set as any).setId}`}
             className="w-full aspect-square object-cover rounded-md border border-gray-800 bg-black"
           />
-
           <div className="mt-4">
             <div className="text-xs uppercase tracking-wide text-gray-500">Set</div>
-            <div className="text-3xl font-bold">{set.setId}</div>
-            {set.name && <div className="text-gray-400 mt-1">{set.name}</div>}
+            <div className="text-3xl font-bold">{(set as any).setId}</div>
+            {(set as any).name && (
+              <div className="text-gray-400 mt-1">{(set as any).name}</div>
+            )}
           </div>
         </div>
 
@@ -71,31 +66,35 @@ export default function SetPage() {
           <h2 className="text-xl font-semibold mb-3">Retailers</h2>
 
           <div className="space-y-3">
-            {set.offers.map((o, idx) => (
-              <a
-                key={idx}
-                href={`/out?u=${encodeURIComponent(o.affiliateUrl)}&setId=${encodeURIComponent(
-                  set.setId
-                )}&retailer=${encodeURIComponent(o.retailer)}`}
-                target="_blank"
-                rel="noopener noreferrer nofollow sponsored"
-                className="flex justify-between items-center border border-gray-800 rounded-md px-4 py-3 hover:border-gray-600 hover:bg-gray-900 transition"
-              >
-                <div className="flex flex-col">
-                  <span className="font-medium">{o.retailer}</span>
-                  <span className="text-xs text-gray-500">Open deal</span>
-                </div>
+            {(set as any).offers
+              ?.filter((o: any) => !!o.url)
+              .map((o: any, idx: number) => (
+                <a
+                  key={`${o.retailer}-${idx}`}
+                  href={`/out?u=${encodeURIComponent(o.url)}&setId=${encodeURIComponent(
+                    (set as any).setId
+                  )}&retailer=${encodeURIComponent(o.retailer)}`}
+                  target="_blank"
+                  rel="noopener noreferrer nofollow sponsored"
+                  className="flex justify-between items-center border border-gray-800 rounded-md px-4 py-3 hover:border-gray-600 hover:bg-gray-900 transition"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-medium">{o.retailer}</span>
+                    <span className="text-xs text-gray-500">Open deal</span>
+                  </div>
 
-                <div className="flex items-center gap-3">
-                  {set.msrp && (
-                    <span className="text-xs text-gray-500 line-through">
-                      {set.msrp}
+                  <div className="flex items-center gap-3">
+                    {(set as any).msrp != null && (
+                      <span className="text-xs text-gray-500 line-through">
+                        {formatCents((set as any).msrp)}
+                      </span>
+                    )}
+                    <span className="text-green-400 font-semibold">
+                      {formatCents(o.price)}
                     </span>
-                  )}
-                  <span className="text-green-400 font-semibold">{o.price}</span>
-                </div>
-              </a>
-            ))}
+                  </div>
+                </a>
+              ))}
           </div>
 
           <p className="text-xs text-gray-500 mt-4">

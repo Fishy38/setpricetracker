@@ -1,26 +1,64 @@
+// app/api/clicks/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __CLICK_COUNTS__: Map<string, number> | undefined;
-}
+// POST /api/clicks  body: { setId: "66802", retailer: "Amazon" }
+export async function POST(req: Request) {
+  const { setId, retailer } = await req.json().catch(() => ({}));
 
-function getStore() {
-  if (!globalThis.__CLICK_COUNTS__) globalThis.__CLICK_COUNTS__ = new Map();
-  return globalThis.__CLICK_COUNTS__;
-}
-
-export function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const setId = searchParams.get("setId");
-
-  const store = getStore();
-
-  // return all counts (optionally filter by setId)
-  const obj: Record<string, number> = {};
-  for (const [key, val] of store.entries()) {
-    if (!setId || key.startsWith(`${setId}::`)) obj[key] = val;
+  if (!setId || !retailer) {
+    return NextResponse.json({ ok: false, error: "Missing setId or retailer" }, { status: 400 });
   }
 
-  return NextResponse.json(obj);
+  // Ensure Set exists (Click.setIdRef FK references Set.setId)
+  const setRow = await prisma.set.findUnique({
+    where: { setId },
+    select: { setId: true },
+  });
+
+  if (!setRow) {
+    return NextResponse.json({ ok: false, error: "Set not found" }, { status: 404 });
+  }
+
+  await prisma.click.upsert({
+    where: {
+      setIdRef_retailer: {
+        setIdRef: setId, // ✅ use LEGO set number (Set.setId)
+        retailer,
+      },
+    },
+    update: { count: { increment: 1 } },
+    create: {
+      setIdRef: setId, // ✅ use LEGO set number (Set.setId)
+      retailer,
+      count: 1,
+    },
+  });
+
+  return NextResponse.json({ ok: true });
+}
+
+// GET /api/clicks?setId=66802  -> { "66802::Amazon": 2, ... }
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const setId = searchParams.get("setId");
+  if (!setId) return NextResponse.json({});
+
+  const setRow = await prisma.set.findUnique({
+    where: { setId },
+    select: { setId: true },
+  });
+  if (!setRow) return NextResponse.json({});
+
+  const rows = await prisma.click.findMany({
+    where: { setIdRef: setId }, // ✅ lego number
+    select: { retailer: true, count: true },
+  });
+
+  const out: Record<string, number> = {};
+  for (const r of rows) out[`${setId}::${r.retailer}`] = r.count;
+
+  return NextResponse.json(out);
 }

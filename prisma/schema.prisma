@@ -1,0 +1,57 @@
+generator client {
+  provider   = "prisma-client-js"
+  output     = "../lib/generated/prisma"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Retailer {
+  LEGO
+  Amazon
+  Walmart
+  Target
+}
+
+model Set {
+  id        String   @id @default(cuid())
+  setId     String   @unique
+  name      String?
+  imageUrl  String
+  msrp      Int? // store cents or whole dollars—pick one & be consistent
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  offers Offer[]
+  clicks Click[]
+}
+
+model Offer {
+  id        String   @id @default(cuid())
+  setIdRef  String
+  retailer  String
+  price     Int? // same unit as msrp (recommended: cents)
+  url       String?
+  inStock   Boolean? @default(true)
+  updatedAt DateTime @default(now())
+
+  set Set @relation(fields: [setIdRef], references: [setId])
+
+  @@unique([setIdRef, retailer])
+  @@index([setIdRef])
+}
+
+model Click {
+  id        String   @id @default(cuid())
+  setIdRef  String
+  retailer  String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  set Set @relation(fields: [setIdRef], references: [setId])
+
+  @@unique([setIdRef, retailer])
+  @@index([setIdRef])
+}
