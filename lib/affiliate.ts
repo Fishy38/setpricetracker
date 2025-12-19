@@ -2,107 +2,85 @@
 const enc = encodeURIComponent;
 
 /**
- * Amazon
- */
-export const AMAZON_TAG =
-  process.env.NEXT_PUBLIC_AMAZON_TAG || "setpricetracker-20";
-
-export function amazonSearchUrl(setId: string) {
-  return `https://www.amazon.com/s?k=${enc(`LEGO ${setId}`)}&tag=${enc(AMAZON_TAG)}`;
-}
-
-/**
- * Walmart / Target (plain search for now)
- */
-export function walmartSearchUrl(setId: string) {
-  return `https://www.walmart.com/search?q=${enc(`LEGO ${setId}`)}`;
-}
-
-export function targetSearchUrl(setId: string) {
-  return `https://www.target.com/s?searchTerm=${enc(`LEGO ${setId}`)}`;
-}
-
-/**
- * Rakuten / LinkShare
+ * Rakuten / LinkShare (LinkSynergy) settings
  *
- * IMPORTANT:
- * - RAKUTEN_PUBLISHER_ID must be the token-looking value (e.g. "ymzYtGY2iZw"),
- *   NOT your numeric SID.
+ * - RAKUTEN_PUBLISHER_ID: looks like "ymzYtGY2iZw" (from your Copy Link Code)
+ * - RAKUTEN_LEGO_MID: "13923" (not required for the "link" URL, but fine to keep)
  */
 export const RAKUTEN_PUBLISHER_ID =
-  process.env.RAKUTEN_PUBLISHER_ID ||
-  process.env.NEXT_PUBLIC_RAKUTEN_PUBLISHER_ID ||
-  "";
+  process.env.RAKUTEN_PUBLISHER_ID || process.env.NEXT_PUBLIC_RAKUTEN_PUBLISHER_ID || "";
 
-export const LEGO_MID =
-  process.env.RAKUTEN_LEGO_MID ||
-  process.env.NEXT_PUBLIC_RAKUTEN_LEGO_MID ||
-  "13923"; // LEGO Brand Retail (US)
+export const RAKUTEN_LEGO_MID =
+  process.env.RAKUTEN_LEGO_MID || process.env.NEXT_PUBLIC_RAKUTEN_LEGO_MID || "13923";
 
 /**
- * Standard Rakuten deeplink. This is what you WANT long-term.
- * If RAKUTEN_PUBLISHER_ID is missing, we fall back to destinationUrl so your app still works.
+ * Build a Rakuten "link" URL (this matches what "Copy link code" gives you).
+ *
+ * Example from your dashboard:
+ * https://click.linksynergy.com/link?id=ymzYtGY2iZw&offerid=1606623.139239885619449048605586&type=2&murl=https%3a%2f%2fwww.lego.com%2fen-us%2fproduct%2f...-77238
  */
-export function rakutenDeeplink(params: {
+export function rakutenLinkUrl(params: {
   destinationUrl: string;
-  mid?: string;
-  u1?: string; // optional tracking param
+  offerId: string;
+  u1?: string;
 }) {
-  const { destinationUrl, mid = LEGO_MID, u1 } = params;
+  const { destinationUrl, offerId, u1 } = params;
 
-  if (!RAKUTEN_PUBLISHER_ID) return destinationUrl;
+  if (!RAKUTEN_PUBLISHER_ID) {
+    // If missing, we still return the raw destination so the app works locally.
+    return destinationUrl;
+  }
 
-  let url =
-    `https://click.linksynergy.com/deeplink` +
-    `?id=${enc(RAKUTEN_PUBLISHER_ID)}` +
-    `&mid=${enc(mid)}` +
-    `&murl=${enc(destinationUrl)}`;
+  const base = `https://click.linksynergy.com/link?id=${enc(RAKUTEN_PUBLISHER_ID)}&offerid=${enc(
+    offerId
+  )}&type=2&murl=${enc(destinationUrl)}`;
 
-  if (u1) url += `&u1=${enc(u1)}`;
-
-  return url;
+  // Optional subid tracking (Rakuten supports "u1" on many programs; safe to include when present)
+  return u1 ? `${base}&u1=${enc(u1)}` : base;
 }
 
 /**
- * LEGO.com URLs
- * - Search URL (fallback)
+ * LEGO destination URLs
+ * If you don't have the exact product page URL/slug yet, we fall back to search.
  */
 export function legoSearchUrl(setId: string) {
   return `https://www.lego.com/en-us/search?q=${enc(setId)}`;
 }
 
 /**
- * Preferred: affiliate deeplink to an *actual product page* URL.
- * You MUST pass the real product URL (slugged), because LEGO product URLs aren’t just /product/{setId}.
+ * Build a LEGO affiliate URL that goes to a PRODUCT PAGE when you have the offerId.
+ * If offerId is missing, falls back to LEGO search page (non-affiliate) so nothing breaks.
  */
-export function legoAffiliateUrlFromProductPage(destinationProductUrl: string, setId?: string) {
-  return rakutenDeeplink({
-    destinationUrl: destinationProductUrl,
-    mid: LEGO_MID,
-    u1: setId, // optional
+export function legoAffiliateUrlFromProductPage(params: {
+  setId: string;
+  destinationUrl?: string; // product page preferred
+  offerId?: string; // required to produce Rakuten affiliate link
+}) {
+  const { setId, destinationUrl, offerId } = params;
+
+  const dest = destinationUrl || legoSearchUrl(setId);
+
+  // Without offerId, we can't create the exact product affiliate link you copied.
+  if (!offerId) return dest;
+
+  return rakutenLinkUrl({
+    destinationUrl: dest,
+    offerId,
+    u1: setId,
   });
 }
 
-/**
- * When you copy “link code” from Rakuten, you get a product-specific offerid.
- * If you have that offerid, you can generate the exact same click URL Rakuten gave you:
- *
- * https://click.linksynergy.com/link?id=...&offerid=...&type=2&murl=...
- */
-export function rakutenOfferLink(params: {
-  destinationUrl: string;
-  offerId: string; // e.g. "1606623.139239885619449048605586"
-  type?: number; // Rakuten uses type=2 in your example
-}) {
-  const { destinationUrl, offerId, type = 2 } = params;
+// Amazon
+export const AMAZON_TAG = process.env.NEXT_PUBLIC_AMAZON_TAG || "setpricetracker-20";
+export function amazonSearchUrl(setId: string) {
+  return `https://www.amazon.com/s?k=${enc(`LEGO ${setId}`)}&tag=${enc(AMAZON_TAG)}`;
+}
 
-  if (!RAKUTEN_PUBLISHER_ID) return destinationUrl;
+// Walmart / Target
+export function walmartSearchUrl(setId: string) {
+  return `https://www.walmart.com/search?q=${enc(`LEGO ${setId}`)}`;
+}
 
-  return (
-    `https://click.linksynergy.com/link` +
-    `?id=${enc(RAKUTEN_PUBLISHER_ID)}` +
-    `&offerid=${enc(offerId)}` +
-    `&type=${enc(String(type))}` +
-    `&murl=${enc(destinationUrl)}`
-  );
+export function targetSearchUrl(setId: string) {
+  return `https://www.target.com/s?searchTerm=${enc(`LEGO ${setId}`)}`;
 }
