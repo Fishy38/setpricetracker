@@ -54,7 +54,7 @@ export type SetRow = {
       setId: "40524",
       name: "Sunflowers",
       imageUrl: "https://www.lego.com/cdn/cs/set/assets/blteb14e8c6c9e027df/40524.png?format=jpg&fit=bounds&quality=80",
-      msrp: "14.99",
+      msrp: "15.99",
       legoUrl: "https://www.lego.com/en-us/product/sunflowers-40524",
       rakutenOfferId: "1606623.139239615568265922045742",
     },
