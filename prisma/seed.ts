@@ -9,7 +9,7 @@ import {
 } from "../lib/affiliate";
 
 import { parsePriceToCents } from "../lib/utils";
-import type { Retailer } from "@prisma/client";
+type Retailer = string;
 
 async function main() {
   for (const s of SETS as any[]) {

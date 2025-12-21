@@ -13,7 +13,7 @@ import {
   legoAffiliateUrlFromProductPage,
 } from "@/lib/affiliate";
 import { parsePriceToCents } from "@/lib/utils";
-import type { Retailer } from "@prisma/client";
+type Retailer = string;
 
 // ✅ Build absolute origin safely (works on Vercel w/out NEXT_PUBLIC_SITE_URL)
 function getOriginFromRequest(req: Request) {
