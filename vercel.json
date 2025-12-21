@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/refresh/lego-all",
+      "path": "/api/cron/daily",
       "schedule": "0 3 * * *"
     }
   ]

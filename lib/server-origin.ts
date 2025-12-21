@@ -1,12 +1,10 @@
-// app/lib/server-origin.ts
+// lib/server-origin.ts
 import { headers } from "next/headers";
 
 export async function getServerOrigin() {
   const h = await headers();
 
-  const xForwardedHost = h.get("x-forwarded-host");
-  const host = xForwardedHost ?? h.get("host");
-
+  const host = h.get("x-forwarded-host") ?? h.get("host");
   const proto = h.get("x-forwarded-proto") ?? "https";
 
   if (!host) {

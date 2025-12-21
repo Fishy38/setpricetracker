@@ -11,6 +11,10 @@ export const RAKUTEN_LEGO_MID =
   process.env.NEXT_PUBLIC_RAKUTEN_LEGO_MID ||
   "13923";
 
+/**
+ * Build a Rakuten click URL. If u1 is present, Rakuten reports can show it.
+ * That is your best “anti-hijack” signal (match sales back to click ids).
+ */
 export function rakutenLinkUrl(params: {
   destinationUrl: string;
   offerId: string;
@@ -29,6 +33,25 @@ export function rakutenLinkUrl(params: {
   return u1 ? `${base}&u1=${enc(u1)}` : base;
 }
 
+/**
+ * If you already have a Rakuten click URL, ensure it contains u1=cid.
+ * (We also do this server-side in /out to guarantee it.)
+ */
+export function ensureRakutenU1(rawUrl: string, cid: string): string {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname.toLowerCase();
+    const isRakutenClick =
+      host.includes("linksynergy.com") || host.includes("click.linksynergy.com");
+    if (!isRakutenClick) return rawUrl;
+
+    if (!u.searchParams.get("u1")) u.searchParams.set("u1", cid);
+    return u.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 export function legoSearchUrl(setId: string) {
   return `https://www.lego.com/en-us/search?q=${enc(setId)}`;
 }
@@ -37,12 +60,14 @@ export function legoAffiliateUrlFromProductPage(params: {
   setId: string;
   destinationUrl?: string;
   offerId?: string;
+  cid?: string;
 }) {
-  const { setId, destinationUrl, offerId } = params;
+  const { setId, destinationUrl, offerId, cid } = params;
   const dest = destinationUrl || legoSearchUrl(setId);
   if (!offerId) return dest;
 
-  return rakutenLinkUrl({ destinationUrl: dest, offerId, u1: setId });
+  // If cid is given, use it as u1; otherwise fall back to setId.
+  return rakutenLinkUrl({ destinationUrl: dest, offerId, u1: cid ?? setId });
 }
 
 // ✅ alias for your current seed route import name

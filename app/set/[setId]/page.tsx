@@ -1,9 +1,9 @@
 // app/set/[setId]/page.tsx
 import Link from "next/link";
-import { headers } from "next/headers";
 import { PriceChart } from "@/app/components/PriceChart";
 import { prisma } from "@/lib/prisma";
 import { SETS } from "@/lib/sets";
+import { getServerOrigin } from "@/lib/server-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,19 +22,6 @@ function sortOffersByPrice(offers: any[]) {
     if (bp == null) return -1;
     return ap - bp;
   });
-}
-
-async function getServerOrigin() {
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host");
-  const proto = h.get("x-forwarded-proto") ?? "https";
-
-  if (!host) {
-    if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-    return "http://localhost:3000";
-  }
-
-  return `${proto}://${host}`;
 }
 
 type PageProps = {
@@ -87,14 +74,18 @@ export default async function SetPage({ params }: PageProps) {
       <section className="w-full max-w-5xl grid grid-cols-2 gap-8">
         {/* LEFT */}
         <div className="border border-gray-800 rounded-md p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={(set as any).imageUrl}
             className="w-full aspect-square object-cover rounded-md border border-gray-800"
+            alt={(set as any).name ?? `LEGO Set ${setId}`}
           />
           <div className="mt-4">
             <div className="text-xs uppercase text-gray-500">Set</div>
             <div className="text-3xl font-bold">{setId}</div>
-            {(set as any).name && <div className="text-gray-400">{(set as any).name}</div>}
+            {(set as any).name && (
+              <div className="text-gray-400">{(set as any).name}</div>
+            )}
           </div>
         </div>
 
@@ -102,31 +93,43 @@ export default async function SetPage({ params }: PageProps) {
         <div className="border border-gray-800 rounded-md p-4">
           <h2 className="text-xl font-semibold mb-3">Retailers</h2>
 
-          {offersToShow.map((o: any, i: number) => (
-            <a
-              key={i}
-              href={`/out?u=${encodeURIComponent(o.url)}&setId=${setId}&retailer=${o.retailer}`}
-              target="_blank"
-              rel="noopener noreferrer nofollow sponsored"
-              className="flex justify-between items-center border border-gray-800 rounded-md px-4 py-3 hover:bg-gray-900"
-            >
-              <div>
-                <div className="font-medium">{o.retailer}</div>
-                <div className="text-xs text-gray-500">Open deal</div>
-              </div>
+          {offersToShow.map((o: any, i: number) => {
+            // cid is what lets you correlate a click to Rakuten u1 (anti-hijack signal)
+            const cid =
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-              <div className="flex gap-2 items-center">
-                {(set as any).msrp && (
-                  <span className="text-xs line-through text-gray-500">
-                    {formatCents((set as any).msrp)}
+            return (
+              <a
+                key={i}
+                href={`/out?u=${encodeURIComponent(o.url)}&setId=${encodeURIComponent(
+                  setId
+                )}&retailer=${encodeURIComponent(o.retailer)}&cid=${encodeURIComponent(
+                  cid
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer nofollow sponsored"
+                className="flex justify-between items-center border border-gray-800 rounded-md px-4 py-3 hover:bg-gray-900"
+              >
+                <div>
+                  <div className="font-medium">{o.retailer}</div>
+                  <div className="text-xs text-gray-500">Open deal</div>
+                </div>
+
+                <div className="flex gap-2 items-center">
+                  {(set as any).msrp && (
+                    <span className="text-xs line-through text-gray-500">
+                      {formatCents((set as any).msrp)}
+                    </span>
+                  )}
+                  <span className="text-green-400 font-semibold">
+                    {formatCents(o.price)}
                   </span>
-                )}
-                <span className="text-green-400 font-semibold">
-                  {formatCents(o.price)}
-                </span>
-              </div>
-            </a>
-          ))}
+                </div>
+              </a>
+            );
+          })}
         </div>
       </section>
 
