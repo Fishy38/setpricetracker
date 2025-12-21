@@ -26,7 +26,7 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "lib/rakuten/fetchProducts.ts",
-    "prisma/prisma.config.ts"                     // ✅ use config.ts not config.js
+    "prisma.config.ts"                     // ✅ use config.ts not config.js
   ],
   "exclude": ["node_modules"]
 }
