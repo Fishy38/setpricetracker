@@ -1,5 +1,10 @@
+// app/api/admin/test-insert/route.ts
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { Retailer } from "@prisma/client";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET() {
   // ✅ Bypass auth only in development
@@ -9,7 +14,7 @@ export async function GET() {
 
   try {
     const setId = "76445";
-    const retailer = "LEGO";
+    const retailer = Retailer.LEGO;
 
     const inserted = await prisma.priceHistory.create({
       data: {

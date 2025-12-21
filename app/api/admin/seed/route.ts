@@ -67,7 +67,9 @@ export async function POST(req: Request) {
 
   const merchantId = process.env.RAKUTEN_ADVERTISER_ID;
   if (!merchantId) {
-    console.warn("⚠️ RAKUTEN_ADVERTISER_ID not set — LEGO links may not be tracked.");
+    console.warn(
+      "⚠️ RAKUTEN_ADVERTISER_ID not set — LEGO links may not be tracked."
+    );
   }
 
   for (const s of SETS as any[]) {

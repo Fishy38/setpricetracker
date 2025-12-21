@@ -1,3 +1,4 @@
+// app/api/admin/rakuten-refresh/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -7,7 +8,7 @@ export async function GET() {
   try {
     const { spawn } = await import("child_process");
 
-    const child = spawn("npx", ["tsx", "scripts/sync-rakuten.ts"], {
+    spawn("npx", ["tsx", "scripts/sync-rakuten.ts"], {
       stdio: "inherit",
       shell: true,
     });
@@ -15,9 +16,6 @@ export async function GET() {
     return NextResponse.json({ ok: true, message: "Rakuten sync started." });
   } catch (err: any) {
     console.error("❌ Failed to trigger sync script:", err);
-    return NextResponse.json(
-      { ok: false, error: err.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }
 }

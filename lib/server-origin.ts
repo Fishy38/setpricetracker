@@ -1,6 +1,7 @@
+// app/lib/server-origin.ts
 import { headers } from "next/headers";
 
-async function getServerOrigin() {
+export async function getServerOrigin() {
   const h = await headers();
 
   const xForwardedHost = h.get("x-forwarded-host");

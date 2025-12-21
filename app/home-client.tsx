@@ -1,3 +1,4 @@
+// app/home-client.tsx
 "use client";
 
 import Link from "next/link";
@@ -45,6 +46,49 @@ type SortKey = "biggestDiscount" | "lowestPrice" | "highestPrice" | "setId";
 const PAGE_SIZE = 80;
 const DEFAULT_SORT: SortKey = "biggestDiscount";
 
+type CategorySlug =
+  | "all"
+  | "star-wars"
+  | "technic"
+  | "icons"
+  | "botanicals"
+  | "city"
+  | "friends"
+  | "ninjago"
+  | "harry-potter"
+  | "marvel"
+  | "disney"
+  | "minecraft"
+  | "jurassic"
+  | "speed-champions"
+  | "architecture"
+  | "ideas"
+  | "creator"
+  | "art"
+  | "other";
+
+const CATEGORIES: { slug: CategorySlug; label: string }[] = [
+  { slug: "all", label: "All" },
+  { slug: "star-wars", label: "Star Wars" },
+  { slug: "technic", label: "Technic" },
+  { slug: "icons", label: "Icons" },
+  { slug: "botanicals", label: "Botanicals" },
+  { slug: "city", label: "City" },
+  { slug: "friends", label: "Friends" },
+  { slug: "ninjago", label: "Ninjago" },
+  { slug: "harry-potter", label: "Harry Potter" },
+  { slug: "marvel", label: "Marvel" },
+  { slug: "disney", label: "Disney" },
+  { slug: "minecraft", label: "Minecraft" },
+  { slug: "jurassic", label: "Jurassic" },
+  { slug: "speed-champions", label: "Speed Champions" },
+  { slug: "architecture", label: "Architecture" },
+  { slug: "ideas", label: "Ideas" },
+  { slug: "creator", label: "Creator" },
+  { slug: "art", label: "Art" },
+  { slug: "other", label: "Other" },
+];
+
 function money(cents?: number | null) {
   if (cents == null) return "—";
   return `$${(cents / 100).toFixed(2)}`;
@@ -73,8 +117,7 @@ function normalizeSets(input: any[]): UiSetRow[] {
       imageUrl: String(s.imageUrl),
       msrpCents,
       bestOffer,
-      discountCents:
-        typeof s.discountCents === "number" ? s.discountCents : null,
+      discountCents: typeof s.discountCents === "number" ? s.discountCents : null,
       discountPct: typeof s.discountPct === "number" ? s.discountPct : null,
     };
   });
@@ -168,7 +211,54 @@ function coercePage(v: string | null) {
   return Math.max(1, Math.floor(n));
 }
 
-export default function HomeClient() {
+function toSlug(v: string | null | undefined): CategorySlug {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (!s) return "all";
+
+  const exists = CATEGORIES.some((c) => c.slug === (s as CategorySlug));
+  return exists ? (s as CategorySlug) : "other";
+}
+
+function categorizeSet(set: UiSetRow): CategorySlug {
+  const name = String(set.name ?? "").toLowerCase();
+
+  if (name.includes("star wars") || name.includes("mandalorian") || name.includes("jedi"))
+    return "star-wars";
+  if (name.includes("technic")) return "technic";
+  if (name.includes("icons")) return "icons";
+  if (
+    name.includes("botanical") ||
+    name.includes("flower") ||
+    name.includes("bouquet") ||
+    name.includes("orchid") ||
+    name.includes("bonsai") ||
+    name.includes("succulent")
+  )
+    return "botanicals";
+  if (name.includes("city")) return "city";
+  if (name.includes("friends")) return "friends";
+  if (name.includes("ninjago")) return "ninjago";
+  if (name.includes("harry potter") || name.includes("hogwarts")) return "harry-potter";
+  if (name.includes("marvel") || name.includes("avengers") || name.includes("spider-man"))
+    return "marvel";
+  if (name.includes("disney") || name.includes("princess") || name.includes("pixar"))
+    return "disney";
+  if (name.includes("minecraft")) return "minecraft";
+  if (name.includes("jurassic") || name.includes("dinosaur")) return "jurassic";
+  if (name.includes("speed champions")) return "speed-champions";
+  if (name.includes("architecture")) return "architecture";
+  if (name.includes("ideas")) return "ideas";
+  if (name.includes("creator")) return "creator";
+  if (name.includes("art")) return "art";
+
+  return "other";
+}
+
+export default function HomeClient({
+  initialCategory,
+}: {
+  initialCategory?: string | null;
+}) {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -178,6 +268,13 @@ export default function HomeClient() {
   const [loading, setLoading] = useState(true);
   const [sets, setSets] = useState<UiSetRow[]>([]);
   const didInitFromUrl = useRef(false);
+
+  const category: CategorySlug = useMemo(() => {
+    const fromProp = toSlug(initialCategory);
+    return fromProp === "other" && String(initialCategory ?? "").trim() === "" ? "all" : fromProp;
+  }, [initialCategory]);
+
+  const basePath = category === "all" ? "/" : `/category/${category}`;
 
   useEffect(() => {
     const urlQ = sp.get("q") ?? "";
@@ -217,9 +314,12 @@ export default function HomeClient() {
   }, []);
 
   const filteredSortedList = useMemo(() => {
-    const filtered = (sets ?? []).filter((s) => matchesQuery(s, q));
+    const filteredByCategory =
+      category === "all" ? sets ?? [] : (sets ?? []).filter((s) => categorizeSet(s) === category);
+
+    const filtered = filteredByCategory.filter((s) => matchesQuery(s, q));
     return sortSets(filtered, sortKey);
-  }, [sets, q, sortKey]);
+  }, [sets, q, sortKey, category]);
 
   const pageCount = useMemo(() => {
     return Math.max(1, Math.ceil(filteredSortedList.length / PAGE_SIZE));
@@ -246,9 +346,9 @@ export default function HomeClient() {
     if (page > 1) params.set("page", String(page));
 
     const qs = params.toString();
-    const next = qs ? `/?${qs}` : "/";
+    const next = qs ? `${basePath}?${qs}` : basePath;
     router.replace(next);
-  }, [q, sortKey, page, router]);
+  }, [q, sortKey, page, router, basePath]);
 
   function go() {
     const raw = q.trim();
@@ -275,11 +375,22 @@ export default function HomeClient() {
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center px-6 py-12">
-      <header className="mb-10 text-center">
+      <header className="mb-6 text-center">
         <h1 className="text-4xl font-bold mb-3">SetPriceTracker</h1>
         <p className="text-gray-400 max-w-xl">
           Track LEGO set prices across major retailers and find the best deal.
         </p>
+
+        {!loading && category !== "all" && (
+          <div className="mt-3 text-xs text-gray-500">
+            Category:{" "}
+            <span className="text-gray-300">
+              {CATEGORIES.find((c) => c.slug === category)?.label ?? "Other"}
+            </span>{" "}
+            • Showing {filteredSortedList.length} item
+            {filteredSortedList.length === 1 ? "" : "s"}
+          </div>
+        )}
       </header>
 
       <section className="w-full max-w-6xl mb-6 flex flex-col gap-3">
@@ -311,9 +422,7 @@ export default function HomeClient() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-wide text-gray-500">
-              Sort
-            </span>
+            <span className="text-xs uppercase tracking-wide text-gray-500">Sort</span>
             <select
               value={sortKey}
               onChange={(e) => onChangeSort(e.target.value as SortKey)}
@@ -347,18 +456,10 @@ export default function HomeClient() {
         )}
       </section>
 
-      {!loading && (
-        <Pagination
-          page={page}
-          pageCount={pageCount}
-          onPageChange={onChangePage}
-        />
-      )}
+      {!loading && <Pagination page={page} pageCount={pageCount} onPageChange={onChangePage} />}
 
       <footer className="mt-16 text-sm text-gray-500 text-center">
-        <p className="mb-2">
-          As an Amazon Associate, we earn from qualifying purchases.
-        </p>
+        <p className="mb-2">As an Amazon Associate, we earn from qualifying purchases.</p>
         <p>© {new Date().getFullYear()} SetPriceTracker</p>
       </footer>
     </main>
@@ -382,11 +483,8 @@ function PriceCard({
   msrpCents: number | null;
   discountPct: number | null;
 }) {
-  const showMsrpLine =
-    msrpCents != null && priceCents != null && priceCents < msrpCents;
-
-  const showDiscountBadge =
-    showMsrpLine && discountPct != null && discountPct > 0;
+  const showMsrpLine = msrpCents != null && priceCents != null && priceCents < msrpCents;
+  const showDiscountBadge = showMsrpLine && discountPct != null && discountPct > 0;
 
   return (
     <Link href={`/set/${setId}`} className="w-full">
@@ -406,9 +504,7 @@ function PriceCard({
         </div>
 
         <div className="flex items-baseline gap-1 mb-1">
-          <span className="text-xs uppercase tracking-wide text-gray-500">
-            Set
-          </span>
+          <span className="text-xs uppercase tracking-wide text-gray-500">Set</span>
           <span className="text-gray-300 font-semibold">{setId}</span>
         </div>
 
@@ -420,13 +516,9 @@ function PriceCard({
 
         <div className="flex items-end gap-2">
           {showMsrpLine && (
-            <span className="text-xs text-gray-500 line-through">
-              {money(msrpCents)}
-            </span>
+            <span className="text-xs text-gray-500 line-through">{money(msrpCents)}</span>
           )}
-          <span className="text-green-400 font-semibold">
-            {money(priceCents)}
-          </span>
+          <span className="text-green-400 font-semibold">{money(priceCents)}</span>
         </div>
       </div>
     </Link>

@@ -1,7 +1,20 @@
 // app/api/sets/[setId]/price-history/route.ts
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { Retailer } from "@prisma/client";
+
+function coerceRetailer(v: string | null): Retailer | null {
+  if (!v) return null;
+  const s = v.trim();
+
+  // Accept exact enum keys/values like "LEGO", "Amazon", etc.
+  if (s in Retailer) return Retailer[s as keyof typeof Retailer];
+
+  return null;
+}
 
 // ✅ Must await context.params in App Router
 export async function GET(
@@ -11,15 +24,13 @@ export async function GET(
   const { setId } = await context.params;
 
   if (!setId) {
-    return NextResponse.json(
-      { error: "❌ Missing setId param" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "❌ Missing setId param" }, { status: 400 });
   }
 
   try {
     const url = new URL(req.url);
-    const retailer = url.searchParams.get("retailer");
+    const retailerParam = url.searchParams.get("retailer");
+    const retailer = coerceRetailer(retailerParam);
 
     const history = await prisma.priceHistory.findMany({
       where: {
@@ -29,16 +40,10 @@ export async function GET(
       orderBy: { recordedAt: "asc" }, // oldest to newest
     });
 
-    console.log(
-      `✅ Found ${history.length} history entries for setId=${setId}${
-        retailer ? ` & retailer=${retailer}` : ""
-      }`
-    );
-
     return NextResponse.json({
       ok: true,
       setId,
-      retailer: retailer || null,
+      retailer: retailer ?? null,
       history,
     });
   } catch (error) {

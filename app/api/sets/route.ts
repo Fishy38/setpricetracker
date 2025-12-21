@@ -13,7 +13,7 @@ export async function GET() {
 
   const shaped = sets.map((s) => {
     const offers = (s.offers ?? []).map((o) => ({
-      retailer: o.retailer,
+      retailer: o.retailer, // enum
       price: o.price, // cents or null
       url: o.url,
       inStock: o.inStock,
@@ -46,7 +46,7 @@ export async function GET() {
       discountCents,
       discountPct,
       clicks: (s.clicks ?? []).reduce((acc, c) => {
-        acc[c.retailer] = c.count;
+        acc[String(c.retailer)] = c.count;
         return acc;
       }, {} as Record<string, number>),
     };

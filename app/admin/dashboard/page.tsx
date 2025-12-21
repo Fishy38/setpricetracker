@@ -38,23 +38,67 @@ export default async function AdminDashboardPage() {
 
   return (
     <main className="max-w-6xl mx-auto p-6 space-y-10">
-      <header className="flex items-start justify-between gap-4">
+      <header className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">🛠 Admin Dashboard</h1>
           <p className="text-sm text-zinc-400 mt-1">
-            Top clicked sets + quick actions. (If the DB is fresh, this page will show empty until tables exist.)
+            Top clicked sets + quick actions. (If the DB is fresh, this page will show empty until
+            tables exist.)
           </p>
         </div>
 
-        {/* Sync Button */}
-        <form action="/api/admin/rakuten-refresh" method="GET">
+        {/* Quick Actions */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Rakuten Sync Button */}
+          <form action="/api/admin/rakuten-refresh" method="GET">
+            <button
+              type="submit"
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
+            >
+              🔁 Sync Rakuten Products
+            </button>
+          </form>
+
+          {/* LEGO Scraper / Refresh Button */}
+          {/* Runs: POST /api/refresh/lego-all?limit=2  (concurrency=2) */}
+          <form action="/api/refresh/lego-all?limit=2" method="POST">
+            <button
+              type="submit"
+              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition"
+              title="Scrape LEGO pages for latest price/stock and write Offer + PriceHistory"
+            >
+              🧱 Refresh LEGO Prices (Scrape)
+            </button>
+          </form>
+
+          {/* OPTIONAL: placeholders for future endpoints */}
           <button
-            type="submit"
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
+            type="button"
+            disabled
+            className="bg-zinc-800 text-zinc-400 px-4 py-2 rounded border border-zinc-700 cursor-not-allowed"
+            title="Create /api/refresh/amazon-all to enable"
           >
-            🔁 Sync Rakuten Products
+            🛒 Refresh Amazon (soon)
           </button>
-        </form>
+
+          <button
+            type="button"
+            disabled
+            className="bg-zinc-800 text-zinc-400 px-4 py-2 rounded border border-zinc-700 cursor-not-allowed"
+            title="Create /api/refresh/walmart-all to enable"
+          >
+            🛒 Refresh Walmart (soon)
+          </button>
+
+          <button
+            type="button"
+            disabled
+            className="bg-zinc-800 text-zinc-400 px-4 py-2 rounded border border-zinc-700 cursor-not-allowed"
+            title="Create /api/refresh/target-all to enable"
+          >
+            🎯 Refresh Target (soon)
+          </button>
+        </div>
       </header>
 
       <section className="space-y-3">

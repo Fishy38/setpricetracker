@@ -1,13 +1,19 @@
-// lib/rakuten.ts
-
 import { parseStringPromise } from "xml2js";
-import { prisma } from "./prisma";
-import { parsePriceToCents } from "./utils";
 
 const PRODUCT_SEARCH_URL = "https://productsearch.linksynergy.com/productsearch";
 
 export function getDeepLink(merchantId: string, destinationUrl: string): string {
-  return `https://click.linksynergy.com/deeplink?id=${process.env.RAKUTEN_PUBLISHER_ID}&mid=${merchantId}&murl=${encodeURIComponent(destinationUrl)}`;
+  const pub = process.env.RAKUTEN_PUBLISHER_ID;
+  if (!pub) return destinationUrl;
+
+  return `https://click.linksynergy.com/deeplink?id=${encodeURIComponent(
+    pub
+  )}&mid=${encodeURIComponent(merchantId)}&murl=${encodeURIComponent(destinationUrl)}`;
+}
+
+function asArray<T>(v: T | T[] | undefined | null): T[] {
+  if (v == null) return [];
+  return Array.isArray(v) ? v : [v];
 }
 
 export async function fetchAllLegoProducts(): Promise<any[]> {
@@ -15,7 +21,9 @@ export async function fetchAllLegoProducts(): Promise<any[]> {
   const webServiceToken = process.env.RAKUTEN_WEB_SERVICE_TOKEN;
 
   if (!advertiserId || !webServiceToken) {
-    throw new Error("Missing Rakuten credentials");
+    throw new Error(
+      "Missing Rakuten credentials (RAKUTEN_LEGO_MID / RAKUTEN_WEB_SERVICE_TOKEN)"
+    );
   }
 
   const results: any[] = [];
@@ -26,28 +34,43 @@ export async function fetchAllLegoProducts(): Promise<any[]> {
     const url = new URL(PRODUCT_SEARCH_URL);
     url.searchParams.set("token", webServiceToken);
     url.searchParams.set("mid", advertiserId);
-    url.searchParams.set("max", max.toString());
-    url.searchParams.set("pagenumber", page.toString());
+    url.searchParams.set("max", String(max));
+    url.searchParams.set("pagenumber", String(page));
 
     const res = await fetch(url.toString(), {
-      headers: {
-        Accept: "application/xml",
-      },
+      headers: { Accept: "application/xml" },
+      cache: "no-store",
     });
 
-    const text = await res.text();
-    const data = await parseStringPromise(text);
-    const products = data?.result?.item ?? [];
+    // ✅ IMPORTANT: Rakuten returns 400 when page > total pages
+    if (res.status === 400) {
+      console.log(`ℹ️ Rakuten pagination complete at page ${page}`);
+      break;
+    }
 
-    if (products.length === 0) break;
+    if (!res.ok) {
+      throw new Error(`Rakuten productsearch failed: ${res.status}`);
+    }
+
+    const text = await res.text();
+    const parsed = await parseStringPromise(text, { explicitArray: false });
+
+    const items = parsed?.result?.item;
+    const products = asArray(items);
+
+    if (!products.length) {
+      console.log(`ℹ️ No products on page ${page}, stopping.`);
+      break;
+    }
 
     results.push(...products);
     console.log(`📦 Page ${page}: Fetched ${products.length}`);
     page++;
 
-    if (page > 50) break;
+    // hard safety stop
+    if (page > 200) break;
   }
 
-  console.log(`✅ Total LEGO products: ${results.length}`);
+  console.log(`✅ Total LEGO products fetched: ${results.length}`);
   return results;
 }

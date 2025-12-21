@@ -1,3 +1,4 @@
+// prisma/schema.prisma
 generator client {
   provider   = "prisma-client-js"
   engineType = "library" // ✅ for edge functions, keep this
@@ -5,8 +6,15 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // NOTE: Prisma v7 moved connection strings to prisma.config.ts in some setups.
+  // If your project already uses prisma.config.ts, do NOT add `url = env("DATABASE_URL")` here.
 }
 
+/**
+ * Keep this enum for code-side safety if you want it,
+ * but we are NOT using it as the DB column type right now.
+ * (We keep Offer/PriceHistory/Click.retailer as String to avoid migration breakage.)
+ */
 enum Retailer {
   LEGO
   Amazon
@@ -15,8 +23,8 @@ enum Retailer {
 }
 
 model Set {
-  id               String    @id @default(cuid())
-  setId            String    @unique
+  id               String   @id @default(cuid())
+  setId            String   @unique
   name             String?
   imageUrl         String
   msrp             Int?
@@ -25,33 +33,38 @@ model Set {
   rakutenProductId String?
   advertiserId     String?
   lastSyncedAt     DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   offers       Offer[]
   clicks       Click[]
   priceHistory PriceHistory[] @relation("SetPriceHistoryBySetId")
+
+  @@index([setId])
+  @@index([updatedAt])
 }
 
 model Offer {
   id        String   @id @default(cuid())
   setIdRef  String
-  retailer  String
+  retailer  String   // ✅ keep as String for now (prevents enum migration failure)
   price     Int?
   url       String?
-  inStock   Boolean? @default(true)
+  inStock   Boolean?
   updatedAt DateTime @default(now())
 
   set Set @relation(fields: [setIdRef], references: [setId], onDelete: Cascade)
 
   @@unique([setIdRef, retailer])
   @@index([setIdRef])
+  @@index([retailer])
+  @@index([updatedAt])
 }
 
 model Click {
   id        String   @id @default(cuid())
   setIdRef  String
-  retailer  String
+  retailer  String   // ✅ keep as String for now (same reason)
   count     Int      @default(0)
   updatedAt DateTime @updatedAt
 
@@ -59,12 +72,13 @@ model Click {
 
   @@unique([setIdRef, retailer])
   @@index([setIdRef])
+  @@index([retailer])
 }
 
 model PriceHistory {
   id         String   @id @default(cuid())
   setIdRef   String
-  retailer   String
+  retailer   String   // ✅ keep as String for now (prevents drop/recreate)
   price      Int?
   inStock    Boolean?
   recordedAt DateTime @default(now())
@@ -72,4 +86,7 @@ model PriceHistory {
   set Set @relation("SetPriceHistoryBySetId", fields: [setIdRef], references: [setId], onDelete: Cascade)
 
   @@index([setIdRef])
+  @@index([retailer])
+  @@index([recordedAt])
+  @@index([setIdRef, retailer, recordedAt])
 }
