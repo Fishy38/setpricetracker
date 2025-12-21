@@ -15,12 +15,9 @@ export async function middleware(req: NextRequest) {
   const ip = forwardedFor.split(",")[0]?.trim() || "unknown";
   const pathname = req.nextUrl.pathname;
 
-  // ✅ Bypass protection for specific dev-only route
-  if (
-    process.env.NODE_ENV === "development" &&
-    pathname === "/api/admin/test-insert"
-  ) {
-    console.log("[MIDDLEWARE] ✅ Bypassed auth for dev route:", pathname);
+  // ✅ Bypass ALL admin auth checks locally in development
+  if (process.env.NODE_ENV === "development") {
+    console.log("[MIDDLEWARE] ✅ Skipping auth in dev mode for:", pathname);
     return NextResponse.next();
   }
 

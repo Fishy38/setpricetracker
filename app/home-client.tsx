@@ -364,6 +364,7 @@ export default function HomeClient() {
     </main>
   );
 }
+
 function PriceCard({
   setId,
   imageUrl,
@@ -411,13 +412,11 @@ function PriceCard({
           <span className="text-gray-300 font-semibold">{setId}</span>
         </div>
 
-        {name ? (
-          <div className="text-sm text-gray-300 mb-1 line-clamp-2">{name}</div>
-        ) : (
-          <div className="font-medium mb-1">{store}</div>
-        )}
+        <div className="text-sm text-gray-300 mb-1 line-clamp-2">
+          {name || `LEGO Set ${setId}`}
+        </div>
 
-        {name && <div className="text-sm text-gray-400 mb-1">{store}</div>}
+        <div className="text-sm text-gray-400 mb-1">{store}</div>
 
         <div className="flex items-end gap-2">
           {showMsrpLine && (

@@ -15,17 +15,34 @@ import {
 import { parsePriceToCents } from "@/lib/utils";
 import type { Retailer } from "@prisma/client";
 
+// ✅ Build absolute origin safely (works on Vercel w/out NEXT_PUBLIC_SITE_URL)
+function getOriginFromRequest(req: Request) {
+  const xfHost = req.headers.get("x-forwarded-host");
+  const host = xfHost ?? req.headers.get("host");
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  if (!host) return null;
+  return `${proto}://${host}`;
+}
+
 // Helper to build affiliate deep link via our API
 async function buildAffiliateUrl(
+  req: Request,
   merchantId: string,
   destinationUrl: string
 ): Promise<string | null> {
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL}/api/rakuten/link`, {
+    const origin = getOriginFromRequest(req);
+    if (!origin) return null;
+
+    const res = await fetch(`${origin}/api/rakuten/link`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ merchantId, destinationUrl }),
+      cache: "no-store",
     });
+
+    if (!res.ok) return null;
+
     const data = await res.json();
     return data.affiliateLink || null;
   } catch (err) {
@@ -86,7 +103,8 @@ export async function POST(req: Request) {
     let legoAffiliateUrl: string | null = null;
 
     if (merchantId && destinationUrl) {
-      legoAffiliateUrl = await buildAffiliateUrl(merchantId, destinationUrl);
+      // ✅ FIX: build absolute URL from request headers
+      legoAffiliateUrl = await buildAffiliateUrl(req, merchantId, destinationUrl);
     }
 
     if (!legoAffiliateUrl) {

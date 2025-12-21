@@ -1,6 +1,6 @@
 generator client {
   provider   = "prisma-client-js"
-  engineType = "library" // ✅ required for adapter usage
+  engineType = "library" // ✅ for edge functions, keep this
 }
 
 datasource db {
@@ -30,7 +30,7 @@ model Set {
 
   offers       Offer[]
   clicks       Click[]
-  priceHistory PriceHistory[] @relation("SetPriceHistoryBySetId") // ✅ match below
+  priceHistory PriceHistory[] @relation("SetPriceHistoryBySetId")
 }
 
 model Offer {

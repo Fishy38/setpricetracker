@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { PriceChart } from "@/components/PriceChart";
 import { prisma } from "@/lib/prisma";
 import { SETS } from "@/lib/sets";
@@ -22,24 +23,31 @@ function sortOffersByPrice(offers: any[]) {
   });
 }
 
+async function getServerOrigin() {
+  const h = await headers();
+
+  const xForwardedHost = h.get("x-forwarded-host");
+  const host = xForwardedHost ?? h.get("host");
+
+  const proto = h.get("x-forwarded-proto") ?? "https";
+
+  if (!host) {
+    if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+    return "http://localhost:3000";
+  }
+
+  return `${proto}://${host}`;
+}
+
 type PageProps = {
-  params: Promise<{
-    setId: string;
-  }> | {
-    setId: string;
-  };
+  params: Promise<{ setId: string }> | { setId: string };
 };
 
 export default async function SetPage({ params }: PageProps) {
-  // ✅ Await params in case it's a Promise (App Router edge case)
   const resolvedParams = await params;
   const setId = resolvedParams?.setId;
 
-  if (!setId) {
-    throw new Error("❌ Missing setId in route params");
-  }
-
-  console.log("✅ setId from route:", setId);
+  if (!setId) throw new Error("Missing setId in route params");
 
   const dbSet = await prisma.set.findUnique({
     where: { setId },
@@ -61,14 +69,27 @@ export default async function SetPage({ params }: PageProps) {
   }
 
   const offersSorted = sortOffersByPrice((set as any).offers ?? []);
-  const offersToShow = offersSorted.filter((o: any) => !!o?.url && o?.price != null);
-
-  const historyRes = await fetch(
-    `${process.env.NEXT_PUBLIC_SITE_URL}/api/sets/${setId}/price-history`,
-    { cache: "no-store" }
+  const offersToShow = offersSorted.filter(
+    (o: any) => !!o?.url && o?.price != null
   );
-  const historyData = await historyRes.json();
-  const priceHistory = historyData?.history ?? [];
+
+  const origin = await getServerOrigin();
+
+  let priceHistory: any[] = [];
+  try {
+    const historyUrl = new URL(
+      `/api/sets/${encodeURIComponent(setId)}/price-history`,
+      origin
+    );
+    const historyRes = await fetch(historyUrl, { cache: "no-store" });
+
+    if (historyRes.ok) {
+      const historyData = await historyRes.json();
+      priceHistory = historyData?.history ?? [];
+    }
+  } catch {
+    priceHistory = [];
+  }
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center px-6 py-12">
@@ -87,7 +108,9 @@ export default async function SetPage({ params }: PageProps) {
             className="w-full aspect-square object-cover rounded-md border border-gray-800 bg-black"
           />
           <div className="mt-4">
-            <div className="text-xs uppercase tracking-wide text-gray-500">Set</div>
+            <div className="text-xs uppercase tracking-wide text-gray-500">
+              Set
+            </div>
             <div className="text-3xl font-bold">{(set as any).setId}</div>
             {(set as any).name && (
               <div className="text-gray-400 mt-1">{(set as any).name}</div>
@@ -100,13 +123,17 @@ export default async function SetPage({ params }: PageProps) {
           <h2 className="text-xl font-semibold mb-3">Retailers</h2>
 
           {offersToShow.length === 0 ? (
-            <div className="text-sm text-gray-400">No live prices yet for this set.</div>
+            <div className="text-sm text-gray-400">
+              No live prices yet for this set.
+            </div>
           ) : (
             <div className="space-y-3">
               {offersToShow.map((o: any, idx: number) => (
                 <a
                   key={`${o.retailer}-${idx}`}
-                  href={`/out?u=${encodeURIComponent(o.url)}&setId=${encodeURIComponent(
+                  href={`/out?u=${encodeURIComponent(
+                    o.url
+                  )}&setId=${encodeURIComponent(
                     (set as any).setId
                   )}&retailer=${encodeURIComponent(o.retailer)}`}
                   target="_blank"
@@ -124,18 +151,21 @@ export default async function SetPage({ params }: PageProps) {
                         {formatCents((set as any).msrp)}
                       </span>
                     )}
-                    <span className="text-green-400 font-semibold">{formatCents(o.price)}</span>
+                    <span className="text-green-400 font-semibold">
+                      {formatCents(o.price)}
+                    </span>
                   </div>
                 </a>
               ))}
             </div>
           )}
 
-          <p className="text-xs text-gray-500 mt-4">Links go through /out for tracking (beta).</p>
+          <p className="text-xs text-gray-500 mt-4">
+            Links go through /out for tracking (beta).
+          </p>
         </div>
       </section>
 
-      {/* ✅ Price history chart */}
       <section className="w-full max-w-5xl mt-12">
         <h2 className="text-xl font-semibold mb-4">Price History</h2>
         {priceHistory.length > 0 ? (
