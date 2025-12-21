@@ -47,5 +47,9 @@
     "tailwindcss": "^4.1.18",
     "tsx": "^4.21.0",
     "typescript": "^5"
+  },
+    "scripts": {
+      "build": "prisma generate --schema=prisma/schema.prisma && next build",
+      "postinstall": "prisma generate --schema=prisma/schema.prisma"
+    }
   }
-}
