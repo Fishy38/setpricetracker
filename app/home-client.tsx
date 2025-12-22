@@ -1,4 +1,3 @@
-// app/home-client.tsx
 "use client";
 
 import Link from "next/link";
@@ -9,21 +8,26 @@ import { parsePriceToCents as parseToCents } from "@/lib/utils";
 
 type ApiOffer = {
   retailer: string;
-  price: number | null;
+  price: number | null; // cents
   url?: string | null;
   inStock?: boolean | null;
-  updatedAt?: string | Date;
+  updatedAt?: string | Date | null;
 };
 
 type ApiSetRow = {
   setId: string;
   name?: string | null;
   imageUrl: string;
-  msrp?: number | null;
+  msrp?: number | null; // cents
   offers: ApiOffer[];
   bestOffer?: ApiOffer | null;
+
   discountCents?: number | null;
   discountPct?: number | null;
+
+  productType?: string | null;
+  setNumber?: string | null;
+  inferredType?: string | null;
 };
 
 type UiOffer = {
@@ -33,12 +37,16 @@ type UiOffer = {
 
 type UiSetRow = {
   setId: string;
-  name?: string | null;
+  name: string | null;
   imageUrl: string;
   msrpCents: number | null;
   bestOffer: UiOffer | null;
   discountCents: number | null;
   discountPct: number | null;
+
+  productType: string | null;
+  setNumber: string | null;
+  inferredType: string | null;
 };
 
 type SortKey = "biggestDiscount" | "lowestPrice" | "highestPrice" | "setId";
@@ -119,6 +127,9 @@ function normalizeSets(input: any[]): UiSetRow[] {
       bestOffer,
       discountCents: typeof s.discountCents === "number" ? s.discountCents : null,
       discountPct: typeof s.discountPct === "number" ? s.discountPct : null,
+      productType: s.productType != null ? String(s.productType) : null,
+      setNumber: s.setNumber != null ? String(s.setNumber) : null,
+      inferredType: s.inferredType != null ? String(s.inferredType) : null,
     };
   });
 }
@@ -146,12 +157,31 @@ function sortSets(list: UiSetRow[], sortKey: SortKey): UiSetRow[] {
     if (sortKey === "setId") return tie();
 
     if (sortKey === "biggestDiscount") {
+      // 1) discounted items: discount % HIGH -> LOW
+      // 2) after discounts: price HIGH -> LOW
       const ap = pct(a);
       const bp = pct(b);
-      if (ap == null && bp == null) return tie();
+
+      const aPrice = price(a);
+      const bPrice = price(b);
+
+      if (ap == null && bp == null) {
+        const aa = aPrice ?? Number.NEGATIVE_INFINITY;
+        const bb = bPrice ?? Number.NEGATIVE_INFINITY;
+        if (bb !== aa) return bb - aa;
+        return tie();
+      }
+
       if (ap == null) return 1;
       if (bp == null) return -1;
-      return bp - ap || tie();
+
+      if (bp !== ap) return bp - ap;
+
+      const aa = aPrice ?? Number.NEGATIVE_INFINITY;
+      const bb = bPrice ?? Number.NEGATIVE_INFINITY;
+      if (bb !== aa) return bb - aa;
+
+      return tie();
     }
 
     if (sortKey === "lowestPrice") {
@@ -256,8 +286,10 @@ function categorizeSet(set: UiSetRow): CategorySlug {
 
 export default function HomeClient({
   initialCategory,
+  type = "SET",
 }: {
   initialCategory?: string | null;
+  type?: "SET" | "MERCH";
 }) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -297,11 +329,14 @@ export default function HomeClient({
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/sets", { cache: "no-store" });
+        const res = await fetch(`/api/sets?type=${encodeURIComponent(type)}`, { cache: "no-store" });
         if (!res.ok) throw new Error("bad response");
         const data = (await res.json()) as ApiSetRow[];
-        if (Array.isArray(data) && data.length) {
-          setSets(normalizeSets(data));
+
+        const normalized = normalizeSets(Array.isArray(data) ? data : []);
+
+        if (normalized.length) {
+          setSets(normalized);
         } else {
           setSets(normalizeSets(FALLBACK_SETS));
         }
@@ -311,7 +346,7 @@ export default function HomeClient({
         setLoading(false);
       }
     })();
-  }, []);
+  }, [type]);
 
   const filteredSortedList = useMemo(() => {
     const filteredByCategory =
@@ -355,7 +390,6 @@ export default function HomeClient({
     if (!raw) return;
     if (isNumericQuery(raw)) {
       router.push(`/set/${raw}`);
-      return;
     }
   }
 
@@ -387,8 +421,7 @@ export default function HomeClient({
             <span className="text-gray-300">
               {CATEGORIES.find((c) => c.slug === category)?.label ?? "Other"}
             </span>{" "}
-            • Showing {filteredSortedList.length} item
-            {filteredSortedList.length === 1 ? "" : "s"}
+            • Showing {filteredSortedList.length} item{filteredSortedList.length === 1 ? "" : "s"}
           </div>
         )}
       </header>
@@ -477,7 +510,7 @@ function PriceCard({
 }: {
   setId: string;
   imageUrl: string;
-  name?: string | null;
+  name: string | null;
   store: string;
   priceCents: number | null;
   msrpCents: number | null;
@@ -492,7 +525,7 @@ function PriceCard({
         <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-black relative">
           <img
             src={imageUrl}
-            alt={`LEGO set ${setId}`}
+            alt={`LEGO item ${setId}`}
             className="w-full h-full object-cover"
             loading="lazy"
           />
@@ -504,12 +537,12 @@ function PriceCard({
         </div>
 
         <div className="flex items-baseline gap-1 mb-1">
-          <span className="text-xs uppercase tracking-wide text-gray-500">Set</span>
+          <span className="text-xs uppercase tracking-wide text-gray-500">ID</span>
           <span className="text-gray-300 font-semibold">{setId}</span>
         </div>
 
         <div className="text-sm text-gray-300 mb-1 line-clamp-2">
-          {name || `LEGO Set ${setId}`}
+          {name || `LEGO Item ${setId}`}
         </div>
 
         <div className="text-sm text-gray-400 mb-1">{store}</div>

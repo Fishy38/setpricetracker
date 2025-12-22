@@ -9,5 +9,5 @@ export default async function CategoryPage({
   const resolved = await params;
   const slug = resolved?.slug;
 
-  return <HomeClient initialCategory={slug} />;
+  return <HomeClient initialCategory={slug} type="SET" />;
 }

@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parsePriceToCents } from "@/lib/utils";
-// NOTE: even if your DB column is String, this resolves to "LEGO" and is safe
-import { Retailer } from "@prisma/client";
+
+const LEGO_RETAILER = "LEGO";
 
 /**
  * Normalize stored LEGO URLs.
@@ -33,15 +33,13 @@ function normalizeLegoUrl(raw: string | null | undefined): string | null {
 
     return raw;
   } catch {
-    // If it's not a valid URL, just return original string
     return raw ?? null;
   }
 }
 
 function extractJsonLd(html: string): any[] {
   const out: any[] = [];
-  const re =
-    /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
 
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
@@ -82,7 +80,6 @@ function findOfferPrice(ld: any[]): { price: unknown; availability?: unknown } |
   for (const node of nodes) {
     const offers = node?.offers;
 
-    // Schema.org often nests inside offers.priceSpecification.price
     const pick = (o: any) => {
       if (!o) return null;
       if (o?.price != null) return { price: o.price, availability: o.availability };
@@ -102,7 +99,6 @@ function findOfferPrice(ld: any[]): { price: unknown; availability?: unknown } |
       if (hit) return hit;
     }
 
-    // Some pages put price directly on the product node
     if (node?.price != null) return { price: node.price, availability: node.availability };
     if (node?.priceSpecification?.price != null) {
       return { price: node.priceSpecification.price, availability: node.availability };
@@ -131,19 +127,13 @@ export async function POST(req: Request) {
   const set = await prisma.set.findUnique({ where: { setId } });
 
   if (!set?.legoUrl) {
-    return NextResponse.json(
-      { ok: false, error: "No legoUrl stored for this setId" },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: "No legoUrl stored for this setId" }, { status: 400 });
   }
 
   const fetchUrl = normalizeLegoUrl(set.legoUrl);
 
   if (!fetchUrl) {
-    return NextResponse.json(
-      { ok: false, error: "Could not normalize legoUrl", legoUrl: set.legoUrl },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, error: "Could not normalize legoUrl", legoUrl: set.legoUrl }, { status: 400 });
   }
 
   const res = await fetch(fetchUrl, {
@@ -158,10 +148,7 @@ export async function POST(req: Request) {
   });
 
   if (!res.ok) {
-    return NextResponse.json(
-      { ok: false, error: `LEGO fetch failed: ${res.status}`, legoUrl: fetchUrl },
-      { status: 502 }
-    );
+    return NextResponse.json({ ok: false, error: `LEGO fetch failed: ${res.status}`, legoUrl: fetchUrl }, { status: 502 });
   }
 
   const html = await res.text();
@@ -173,7 +160,7 @@ export async function POST(req: Request) {
   const inStock = availability ?? (priceCents != null ? true : null);
 
   await prisma.offer.upsert({
-    where: { setIdRef_retailer: { setIdRef: setId, retailer: Retailer.LEGO as any } },
+    where: { setIdRef_retailer: { setIdRef: setId, retailer: LEGO_RETAILER } },
     update: {
       price: priceCents,
       inStock,
@@ -183,7 +170,7 @@ export async function POST(req: Request) {
     },
     create: {
       setIdRef: setId,
-      retailer: Retailer.LEGO as any,
+      retailer: LEGO_RETAILER,
       url: fetchUrl,
       price: priceCents,
       inStock,
@@ -191,7 +178,7 @@ export async function POST(req: Request) {
   });
 
   const last = await prisma.priceHistory.findFirst({
-    where: { setIdRef: setId, retailer: Retailer.LEGO as any },
+    where: { setIdRef: setId, retailer: LEGO_RETAILER },
     orderBy: { recordedAt: "desc" },
   });
 
@@ -201,15 +188,14 @@ export async function POST(req: Request) {
     await prisma.priceHistory.create({
       data: {
         setIdRef: setId,
-        retailer: Retailer.LEGO as any,
+        retailer: LEGO_RETAILER,
         price: priceCents,
         inStock,
       },
     });
   }
 
-  // Optional: also normalize stored Set.legoUrl so future refreshes always hit lego.com directly
-  // (safe even if you later store affiliate separately)
+  // Optional: normalize stored Set.legoUrl so future refreshes always hit lego.com directly
   try {
     if (set.legoUrl !== fetchUrl) {
       await prisma.set.update({

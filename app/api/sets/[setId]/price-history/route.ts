@@ -4,16 +4,14 @@ export const dynamic = "force-dynamic";
 
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
-import { Retailer } from "@prisma/client";
 
-function coerceRetailer(v: string | null): Retailer | null {
+function safeRetailer(v: string | null): string | null {
   if (!v) return null;
   const s = v.trim();
-
-  // Accept exact enum keys/values like "LEGO", "Amazon", etc.
-  if (s in Retailer) return Retailer[s as keyof typeof Retailer];
-
-  return null;
+  if (!s) return null;
+  // Optional guard: limit length so nobody passes insane strings
+  if (s.length > 64) return null;
+  return s;
 }
 
 // ✅ Must await context.params in App Router
@@ -29,13 +27,12 @@ export async function GET(
 
   try {
     const url = new URL(req.url);
-    const retailerParam = url.searchParams.get("retailer");
-    const retailer = coerceRetailer(retailerParam);
+    const retailerParam = safeRetailer(url.searchParams.get("retailer"));
 
     const history = await prisma.priceHistory.findMany({
       where: {
         setIdRef: setId,
-        ...(retailer ? { retailer } : {}),
+        ...(retailerParam ? { retailer: retailerParam as any } : {}),
       },
       orderBy: { recordedAt: "asc" }, // oldest to newest
     });
@@ -43,7 +40,7 @@ export async function GET(
     return NextResponse.json({
       ok: true,
       setId,
-      retailer: retailer ?? null,
+      retailer: retailerParam ?? null,
       history,
     });
   } catch (error) {

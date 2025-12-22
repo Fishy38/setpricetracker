@@ -15,6 +15,8 @@ type TopClickRow = {
   };
 };
 
+// ✅ FIX: your error is P2022 (missing column) not P2021.
+// Treat “table missing” (P2021) AND “column missing” (P2022) as “no data yet”.
 async function getTopClickedSets(limit = 25): Promise<TopClickRow[]> {
   try {
     return await prisma.click.findMany({
@@ -23,8 +25,8 @@ async function getTopClickedSets(limit = 25): Promise<TopClickRow[]> {
       include: { set: true },
     });
   } catch (err: any) {
-    if (err?.code === "P2021") return [];
-    throw err;
+    if (err?.code === "P2021" || err?.code === "P2022") return [];
+    return [];
   }
 }
 
@@ -72,13 +74,13 @@ async function buildEpcWindow(days: number): Promise<{
   const now = new Date();
   const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-  // If tables don't exist yet, return empty (prevents admin from crashing)
   let clicks: {
     cid: string;
     retailer: string | null;
     destination: string;
     destinationHost: string | null;
   }[] = [];
+
   let conversions: {
     cid: string;
     commissionCents: number;
@@ -98,7 +100,8 @@ async function buildEpcWindow(days: number): Promise<{
       take: 50_000,
     });
   } catch (err: any) {
-    if (err?.code !== "P2021") throw err;
+    // ✅ FIX: handle missing table OR missing column
+    if (err?.code !== "P2021" && err?.code !== "P2022") throw err;
   }
 
   try {
@@ -113,7 +116,8 @@ async function buildEpcWindow(days: number): Promise<{
       take: 50_000,
     });
   } catch (err: any) {
-    if (err?.code !== "P2021") throw err;
+    // ✅ FIX: handle missing table OR missing column
+    if (err?.code !== "P2021" && err?.code !== "P2022") throw err;
   }
 
   // Map click cid -> retailer
@@ -161,8 +165,7 @@ async function buildEpcWindow(days: number): Promise<{
     );
   }
 
-  // Simple cookie overwrite / attribution guard:
-  // If it's a Rakuten click host, it MUST contain u1 (you want u1=cID for reconciliation)
+  // If it's a Rakuten click host, it MUST contain u1
   let clicksMissingU1OnRakuten = 0;
   for (const c of clicks) {
     const host = (c.destinationHost ?? "").toLowerCase();
@@ -207,7 +210,6 @@ async function buildEpcWindow(days: number): Promise<{
     };
   });
 
-  // Totals
   const totalClicks = rows.reduce((a, r) => a + r.clicks, 0);
   const totalConv = rows.reduce((a, r) => a + r.conversions, 0);
   const totalComm = rows.reduce((a, r) => a + r.commissionCents, 0);
@@ -247,7 +249,7 @@ export default async function AdminDashboardPage() {
           <h1 className="text-3xl font-bold">🛠 Admin Dashboard</h1>
           <p className="text-sm text-zinc-400 mt-1">
             Top clicked sets + quick actions. (If the DB is fresh, this page will
-            show empty until tables exist.)
+            show empty until tables/columns exist.)
           </p>
         </div>
 
@@ -355,7 +357,6 @@ export default async function AdminDashboardPage() {
               {w.rows.length === 0 ? (
                 <div className="text-sm text-zinc-400">No EPC data yet.</div>
               ) : (
-                // ✅ FIX: remove horizontal scrollbar by forcing fixed layout + tighter columns
                 <div className="overflow-x-hidden">
                   <table className="w-full table-fixed bg-black border border-zinc-700 text-white text-[11px]">
                     <thead className="bg-zinc-800 text-left">
@@ -389,9 +390,7 @@ export default async function AdminDashboardPage() {
                           key={`${w.windowLabel}-${r.retailer}`}
                           className="border-t border-zinc-700 hover:bg-zinc-900"
                         >
-                          <td className="px-2 py-2 truncate">
-                            {r.retailer}
-                          </td>
+                          <td className="px-2 py-2 truncate">{r.retailer}</td>
                           <td className="px-2 py-2 text-right font-semibold whitespace-nowrap">
                             {r.clicks}
                           </td>
@@ -419,8 +418,7 @@ export default async function AdminDashboardPage() {
 
               <div className="text-xs text-zinc-500 mt-3">
                 Note: “Unmatched conversions” means a conversion cid exists
-                without a corresponding OutboundClick(cid) in this window
-                (possible cookie overwrite / missing tracking / window mismatch).
+                without a corresponding OutboundClick(cid) in this window.
               </div>
             </div>
           ))}
@@ -439,12 +437,12 @@ export default async function AdminDashboardPage() {
         {clicks.length === 0 ? (
           <div className="border border-zinc-700 rounded p-4 bg-zinc-950">
             <p className="text-sm text-zinc-300">
-              No click data yet — or your database tables haven’t been created in
-              prod.
+              No click data yet — or your DB doesn’t have the Click/Set tables
+              (or columns) created yet.
             </p>
             <p className="text-xs text-zinc-500 mt-2">
-              Fix: run Prisma DB push/migrations against the same DATABASE_URL
-              Vercel uses.
+              Fix: run Prisma migrations / db push against the same DATABASE_URL
+              your app is using.
             </p>
           </div>
         ) : (

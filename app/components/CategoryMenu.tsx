@@ -50,6 +50,14 @@ export default function CategoryMenu() {
             Shop LEGO
           </a>
 
+          {/* ✅ NEW: Merch tab */}
+          <Link
+            href="/merch"
+            className="px-3 py-2 text-sm border border-gray-700 rounded bg-gray-900 hover:bg-gray-800"
+          >
+            Merch
+          </Link>
+
           {/* Gift Cards is NOT a set category, so it gets its own top-level link */}
           <Link
             href="/giftcards"
