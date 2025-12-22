@@ -40,7 +40,7 @@ function makeCid(provided: string | null): string {
   return crypto.randomUUID();
 }
 
-function ensureRakutenU1(url: URL, cid: string): URL {
+function ensureRakutenU1(url: URL, cid: string, opts?: { force?: boolean }): URL {
   const host = url.hostname.toLowerCase();
   const isRakutenClick =
     host.includes("linksynergy.com") || host.includes("click.linksynergy.com");
@@ -48,7 +48,7 @@ function ensureRakutenU1(url: URL, cid: string): URL {
   if (!isRakutenClick) return url;
 
   // only set if absent (don’t clobber an existing u1 you may have set elsewhere)
-  if (!url.searchParams.get("u1")) {
+  if (!url.searchParams.get("u1") || opts?.force) {
     url.searchParams.set("u1", cid);
   }
 
@@ -66,15 +66,15 @@ export async function GET(req: Request) {
   const retailerEnum = coerceRetailer(retailerParam);
   const retailerString = retailerParam?.trim() || null;
 
-  const cid = makeCid(searchParams.get("cid"));
+  let cid = makeCid(searchParams.get("cid"));
 
   if (!raw) return NextResponse.redirect(new URL("/", req.url));
 
   const destUrl = safeHttpUrl(raw);
   if (!destUrl) return new NextResponse("Bad redirect URL", { status: 400 });
 
-  const finalUrl = ensureRakutenU1(destUrl, cid);
-  const destinationHost = finalUrl.hostname || null;
+  let finalUrl = ensureRakutenU1(destUrl, cid);
+  let destinationHost = finalUrl.hostname || null;
 
   // Best-effort tracking (never block redirect)
   try {
@@ -106,6 +106,17 @@ export async function GET(req: Request) {
 
     const salt = process.env.CLICK_HASH_SALT || "dev";
     const ipHash = hashIp(ip, salt);
+
+    const existing = await prisma.outboundClick.findUnique({
+      where: { cid },
+      select: { cid: true },
+    });
+
+    if (existing) {
+      cid = crypto.randomUUID();
+      finalUrl = ensureRakutenU1(destUrl, cid, { force: true });
+      destinationHost = finalUrl.hostname || null;
+    }
 
     await prisma.outboundClick.create({
       data: {

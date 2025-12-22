@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SETS as FALLBACK_SETS } from "../lib/sets";
-import { parsePriceToCents as parseToCents } from "@/lib/utils";
+import { formatRetailerLabel } from "@/lib/retailer";
+import { formatCentsUsd, parsePriceToCents as parseToCents } from "@/lib/utils";
 
 type ApiOffer = {
   retailer: string;
@@ -97,11 +98,6 @@ const CATEGORIES: { slug: CategorySlug; label: string }[] = [
   { slug: "other", label: "Other" },
 ];
 
-function money(cents?: number | null) {
-  if (cents == null) return "—";
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
 function normalizeSets(input: any[]): UiSetRow[] {
   return (input ?? []).map((s) => {
     const msrpCents = parseToCents(s.msrp);
@@ -114,7 +110,7 @@ function normalizeSets(input: any[]): UiSetRow[] {
 
     const bestOffer: UiOffer | null = bo
       ? {
-          retailer: String(bo.retailer ?? "Unknown"),
+          retailer: formatRetailerLabel(bo.retailer),
           priceCents: parseToCents(bo.price),
         }
       : null;
@@ -549,9 +545,13 @@ function PriceCard({
 
         <div className="flex items-end gap-2">
           {showMsrpLine && (
-            <span className="text-xs text-gray-500 line-through">{money(msrpCents)}</span>
+            <span className="text-xs text-gray-500 line-through">
+              {formatCentsUsd(msrpCents)}
+            </span>
           )}
-          <span className="text-green-400 font-semibold">{money(priceCents)}</span>
+          <span className="text-green-400 font-semibold">
+            {formatCentsUsd(priceCents)}
+          </span>
         </div>
       </div>
     </Link>

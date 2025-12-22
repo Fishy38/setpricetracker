@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { RAKUTEN_LEGO_RETAILER } from "@/lib/retailer";
 
 type ShapedOffer = {
   retailer: string;
@@ -12,6 +13,33 @@ type ShapedOffer = {
   inStock: boolean | null;
   updatedAt: Date | null;
 };
+
+const LEGO_RETAILER = "LEGO";
+
+function mergeRakutenLegoOffer(offers: ShapedOffer[]): ShapedOffer[] {
+  let rakuten: ShapedOffer | null = null;
+  const out: ShapedOffer[] = [];
+
+  for (const o of offers ?? []) {
+    const key = String(o.retailer ?? "").trim().toUpperCase();
+    if (key === RAKUTEN_LEGO_RETAILER) {
+      rakuten = o;
+      continue;
+    }
+    out.push(o);
+  }
+
+  if (rakuten?.url) {
+    const legoIdx = out.findIndex(
+      (o) => String(o.retailer ?? "").trim().toUpperCase() === LEGO_RETAILER
+    );
+    if (legoIdx >= 0) {
+      out[legoIdx] = { ...out[legoIdx], url: rakuten.url };
+    }
+  }
+
+  return out;
+}
 
 function pickBestOffer(offers: ShapedOffer[]): ShapedOffer | null {
   if (!offers?.length) return null;
@@ -145,13 +173,15 @@ export async function GET(req: Request) {
     });
 
     const shaped = rows.map((s) => {
-      const offers: ShapedOffer[] = (s.offers ?? []).map((o) => ({
+      const offersRaw: ShapedOffer[] = (s.offers ?? []).map((o) => ({
         retailer: String(o.retailer ?? "Unknown"),
         price: typeof o.price === "number" ? o.price : null,
         url: o.url ?? null,
         inStock: o.inStock ?? null,
         updatedAt: (o.updatedAt as Date) ?? null,
       }));
+
+      const offers = mergeRakutenLegoOffer(offersRaw);
 
       const bestOffer = pickBestOffer(offers);
       const { discountCents, discountPct } = computeDiscount(

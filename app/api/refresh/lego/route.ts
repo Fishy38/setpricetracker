@@ -8,6 +8,17 @@ import { parsePriceToCents } from "@/lib/utils";
 
 const LEGO_RETAILER = "LEGO";
 
+type RefreshInput = { setId: string; legoUrl: string };
+
+type RefreshResult = {
+  setId: string;
+  ok: boolean;
+  legoUrl: string;
+  priceCents: number | null;
+  inStock: boolean | null;
+  error?: string;
+};
+
 /**
  * Normalize stored LEGO URLs.
  * - If stored URL is a Rakuten LinkShare click url (linksynergy), extract `murl`.
@@ -116,24 +127,13 @@ function availabilityToInStock(v: unknown): boolean | null {
   return null;
 }
 
-export async function POST(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const setId = searchParams.get("setId");
+async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
+  const { setId, legoUrl } = input;
 
-  if (!setId) {
-    return NextResponse.json({ ok: false, error: "Missing setId" }, { status: 400 });
-  }
-
-  const set = await prisma.set.findUnique({ where: { setId } });
-
-  if (!set?.legoUrl) {
-    return NextResponse.json({ ok: false, error: "No legoUrl stored for this setId" }, { status: 400 });
-  }
-
-  const fetchUrl = normalizeLegoUrl(set.legoUrl);
+  const fetchUrl = normalizeLegoUrl(legoUrl);
 
   if (!fetchUrl) {
-    return NextResponse.json({ ok: false, error: "Could not normalize legoUrl", legoUrl: set.legoUrl }, { status: 400 });
+    return { setId, ok: false, error: "Missing/invalid legoUrl", legoUrl, priceCents: null, inStock: null };
   }
 
   const res = await fetch(fetchUrl, {
@@ -148,7 +148,14 @@ export async function POST(req: Request) {
   });
 
   if (!res.ok) {
-    return NextResponse.json({ ok: false, error: `LEGO fetch failed: ${res.status}`, legoUrl: fetchUrl }, { status: 502 });
+    return {
+      setId,
+      ok: false,
+      error: `LEGO fetch failed: ${res.status}`,
+      legoUrl: fetchUrl,
+      priceCents: null,
+      inStock: null,
+    };
   }
 
   const html = await res.text();
@@ -197,7 +204,7 @@ export async function POST(req: Request) {
 
   // Optional: normalize stored Set.legoUrl so future refreshes always hit lego.com directly
   try {
-    if (set.legoUrl !== fetchUrl) {
+    if (legoUrl !== fetchUrl) {
       await prisma.set.update({
         where: { setId },
         data: { legoUrl: fetchUrl },
@@ -207,11 +214,105 @@ export async function POST(req: Request) {
     // don't fail the refresh if this update fails
   }
 
+  return { setId, ok: true, legoUrl: fetchUrl, priceCents, inStock };
+}
+
+// Simple concurrency limiter (so you do not hammer LEGO)
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  let i = 0;
+
+  const workers = Array.from({ length: Math.max(1, limit) }, async () => {
+    while (true) {
+      const idx = i++;
+      if (idx >= items.length) break;
+      results[idx] = await fn(items[idx]);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+export async function POST(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const setId = (searchParams.get("setId") ?? "").trim();
+  const refreshAll = ["1", "true", "yes"].includes(
+    String(searchParams.get("all") ?? "").toLowerCase()
+  );
+
+  if (setId) {
+    const set = await prisma.set.findUnique({ where: { setId } });
+
+    if (!set?.legoUrl) {
+      return NextResponse.json(
+        { ok: false, error: "No legoUrl stored for this setId" },
+        { status: 400 }
+      );
+    }
+
+    const result = await refreshOne({ setId, legoUrl: set.legoUrl });
+    if (!result.ok) {
+      const status = result.error?.startsWith("LEGO fetch failed") ? 502 : 400;
+      return NextResponse.json(
+        {
+          ok: false,
+          error: result.error ?? "Refresh failed",
+          setId: result.setId,
+          legoUrl: result.legoUrl,
+        },
+        { status }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      setId: result.setId,
+      legoUrl: result.legoUrl,
+      priceCents: result.priceCents,
+      inStock: result.inStock,
+    });
+  }
+
+  if (!refreshAll) {
+    return NextResponse.json(
+      { ok: false, error: "Missing setId (for single refresh) or all=1 (for full refresh)" },
+      { status: 400 }
+    );
+  }
+
+  const limitRaw = Number(searchParams.get("limit") ?? 2);
+  const limit = Number.isFinite(limitRaw)
+    ? Math.max(1, Math.min(10, Math.floor(limitRaw)))
+    : 2; // concurrency (default 2)
+
+  const takeRaw = Number(searchParams.get("take") ?? 0);
+  const take = Number.isFinite(takeRaw) ? Math.max(0, Math.floor(takeRaw)) : 0; // take first N sets (0 = all)
+
+  const sets = await prisma.set.findMany({
+    orderBy: { setId: "asc" },
+    ...(take > 0 ? { take } : {}),
+    select: { setId: true, legoUrl: true },
+  });
+
+  const inputs: RefreshInput[] = sets
+    .filter((s) => typeof s.legoUrl === "string" && (s.legoUrl as string).length)
+    .map((s) => ({ setId: s.setId, legoUrl: s.legoUrl as string }));
+
+  const results = await mapLimit(inputs, limit, refreshOne);
+
+  const ok = results.filter((r) => r.ok).length;
+  const failed = results.length - ok;
+
   return NextResponse.json({
     ok: true,
-    setId,
-    legoUrl: fetchUrl,
-    priceCents,
-    inStock,
+    total: results.length,
+    refreshed: ok,
+    failed,
+    results,
   });
+}
+
+export async function GET(req: Request) {
+  return POST(req);
 }

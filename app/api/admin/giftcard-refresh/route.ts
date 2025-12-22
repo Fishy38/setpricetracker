@@ -8,9 +8,15 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const base = `${url.protocol}//${url.host}`;
 
-  const res = await fetch(new URL("/api/refresh/giftcards", base), {
+  const target = new URL("/api/refresh/giftcards", base);
+  target.search = url.search;
+
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (process.env.CRON_SECRET) headers["x-cron-key"] = process.env.CRON_SECRET;
+
+  const res = await fetch(target, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     cache: "no-store",
   });
 
@@ -37,4 +43,8 @@ export async function GET(req: Request) {
     status: 200,
     headers: { "content-type": contentType },
   });
+}
+
+export async function POST(req: Request) {
+  return GET(req);
 }

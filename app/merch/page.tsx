@@ -1,5 +1,7 @@
 // app/merch/page.tsx
 import Link from "next/link";
+import { formatRetailerLabel } from "@/lib/retailer";
+import { formatCentsUsd } from "@/lib/utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,11 +22,6 @@ type ApiRow = {
   productType?: string | null;
   inferredType?: string | null;
 };
-
-function money(cents?: number | null) {
-  if (cents == null) return "—";
-  return `$${(cents / 100).toFixed(2)}`;
-}
 
 export default async function MerchPage() {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "";
@@ -69,8 +66,12 @@ export default async function MerchPage() {
                   </div>
 
                   <div className="text-sm text-gray-300 mb-1 line-clamp-2">{it.name ?? it.setId}</div>
-                  <div className="text-sm text-gray-400 mb-1">{best?.retailer ?? "Unknown"}</div>
-                  <div className="text-green-400 font-semibold">{money(price)}</div>
+                  <div className="text-sm text-gray-400 mb-1">
+                    {formatRetailerLabel(best?.retailer)}
+                  </div>
+                  <div className="text-green-400 font-semibold">
+                    {formatCentsUsd(price)}
+                  </div>
                 </div>
               </Link>
             );

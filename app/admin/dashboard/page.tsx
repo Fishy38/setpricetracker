@@ -1,5 +1,6 @@
 // app/admin/dashboard/page.tsx
 import { prisma } from "@/lib/prisma";
+import { formatRetailerLabel } from "@/lib/retailer";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -52,8 +53,7 @@ function pct(v: number) {
 }
 
 function safeRetailerLabel(v: string | null | undefined) {
-  const s = (v ?? "").trim();
-  return s.length ? s : "Unknown";
+  return formatRetailerLabel(v);
 }
 
 async function buildEpcWindow(days: number): Promise<{
@@ -263,7 +263,7 @@ export default async function AdminDashboardPage() {
             </button>
           </form>
 
-          <form action="/api/refresh/giftcards" method="POST">
+          <form action="/api/admin/giftcard-refresh" method="POST">
             <button
               type="submit"
               className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition"
@@ -273,6 +273,245 @@ export default async function AdminDashboardPage() {
           </form>
         </div>
       </header>
+
+      {/* ADMIN ACTIONS */}
+      <section className="space-y-3">
+        <div className="flex items-end justify-between gap-4">
+          <h2 className="text-2xl font-semibold">Admin Actions</h2>
+          <span className="text-xs text-zinc-400">
+            Manual tools for refreshes and debug endpoints.
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="border border-zinc-700 rounded p-4 bg-zinc-950 space-y-4">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">Refresh</div>
+
+            <form action="/api/refresh/lego" method="GET" className="flex flex-col sm:flex-row gap-2">
+              <input
+                name="setId"
+                placeholder="Set ID (e.g. 75394)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+              >
+                Refresh LEGO Set
+              </button>
+            </form>
+
+            <form action="/api/refresh/lego" method="GET" className="flex flex-col sm:flex-row gap-2">
+              <input type="hidden" name="all" value="1" />
+              <input
+                name="limit"
+                placeholder="Concurrency (default 2)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <input
+                name="take"
+                placeholder="Take N (optional)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+              >
+                Refresh All LEGO
+              </button>
+            </form>
+
+            <form action="/api/admin/giftcard-refresh" method="GET" className="flex flex-col gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  name="keyword"
+                  placeholder="Giftcard keyword (default lego)"
+                  className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+                />
+                <button
+                  type="submit"
+                  className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+                >
+                  Refresh Giftcards
+                </button>
+              </div>
+              <div className="flex items-center gap-4 text-xs text-zinc-400">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="purge" value="1" className="accent-zinc-400" />
+                  Purge old rows
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" name="dry" value="1" className="accent-zinc-400" />
+                  Dry run
+                </label>
+              </div>
+            </form>
+          </div>
+
+          <div className="border border-zinc-700 rounded p-4 bg-zinc-950 space-y-4">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">Utilities</div>
+
+            <form action="/api/admin/fetch-rakuten" method="GET" className="flex flex-col sm:flex-row gap-2">
+              <input
+                name="q"
+                placeholder="Rakuten query (default lego)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <input
+                name="limit"
+                placeholder="Limit (default 10)"
+                className="w-40 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+              >
+                Preview Rakuten
+              </button>
+            </form>
+
+            <form action="/api/admin/epc" method="GET" className="flex flex-col sm:flex-row gap-2">
+              <input
+                name="days"
+                placeholder="EPC window days (default 30)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+              >
+                Export EPC JSON
+              </button>
+            </form>
+
+            <form action="/api/admin/epc" method="POST" className="flex flex-col gap-2">
+              <div className="text-xs text-zinc-400">Manual conversion insert</div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  name="cid"
+                  placeholder="cid"
+                  className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+                />
+                <input
+                  name="commissionCents"
+                  placeholder="commissionCents"
+                  className="w-48 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+                />
+                <input
+                  name="saleAmountCents"
+                  placeholder="saleAmountCents"
+                  className="w-48 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  name="occurredAt"
+                  placeholder="occurredAt (ISO, optional)"
+                  className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+                />
+                <button
+                  type="submit"
+                  className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+                >
+                  Insert Conversion
+                </button>
+              </div>
+            </form>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <form action="/api/admin/seed" method="POST" className="flex-1">
+                <button
+                  type="submit"
+                  className="w-full bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+                >
+                  Seed Sets (dev or SEED_SECRET)
+                </button>
+              </form>
+              <form action="/api/admin/test-insert" method="GET" className="flex-1">
+                <button
+                  type="submit"
+                  className="w-full bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+                >
+                  Insert Test Price History (dev)
+                </button>
+              </form>
+            </div>
+
+            <form action="/api/themes" method="GET">
+              <button
+                type="submit"
+                className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+              >
+                View Theme Counts
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div className="border border-zinc-700 rounded p-4 bg-zinc-950 space-y-3">
+          <div className="text-xs uppercase tracking-wide text-zinc-500">
+            Admin URLs
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            <a
+              href="/api/admin/rakuten-refresh"
+              target="_blank"
+              className="bg-zinc-800 text-white px-3 py-2 rounded hover:bg-zinc-700 transition text-sm text-center"
+              rel="noreferrer"
+            >
+              Rakuten Refresh
+            </a>
+            <a
+              href="/api/admin/fetch-rakuten"
+              target="_blank"
+              className="bg-zinc-800 text-white px-3 py-2 rounded hover:bg-zinc-700 transition text-sm text-center"
+              rel="noreferrer"
+            >
+              Fetch Rakuten
+            </a>
+            <a
+              href="/api/admin/giftcard-refresh"
+              target="_blank"
+              className="bg-zinc-800 text-white px-3 py-2 rounded hover:bg-zinc-700 transition text-sm text-center"
+              rel="noreferrer"
+            >
+              Giftcard Refresh
+            </a>
+            <a
+              href="/api/admin/epc?days=30"
+              target="_blank"
+              className="bg-zinc-800 text-white px-3 py-2 rounded hover:bg-zinc-700 transition text-sm text-center"
+              rel="noreferrer"
+            >
+              EPC JSON
+            </a>
+            <form action="/api/admin/seed" method="POST" target="_blank">
+              <button
+                type="submit"
+                className="w-full bg-zinc-800 text-white px-3 py-2 rounded hover:bg-zinc-700 transition text-sm text-center"
+              >
+                Seed Sets
+              </button>
+            </form>
+            <a
+              href="/api/admin/test-insert"
+              target="_blank"
+              className="bg-zinc-800 text-white px-3 py-2 rounded hover:bg-zinc-700 transition text-sm text-center"
+              rel="noreferrer"
+            >
+              Test Insert
+            </a>
+            <a
+              href="/api/cron/daily"
+              target="_blank"
+              className="bg-zinc-800 text-white px-3 py-2 rounded hover:bg-zinc-700 transition text-sm text-center"
+              rel="noreferrer"
+            >
+              Cron Daily
+            </a>
+          </div>
+        </div>
+      </section>
 
       {/* EPC DASHBOARD */}
       <section className="space-y-3">

@@ -11,7 +11,8 @@ import { prisma } from "@/lib/prisma";
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const days = Math.max(1, Math.min(365, Number(searchParams.get("days") ?? 30)));
+  const daysRaw = Number(searchParams.get("days") ?? 30);
+  const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(365, Math.floor(daysRaw))) : 30;
 
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
@@ -83,11 +84,35 @@ export async function GET(req: Request) {
  * This is the bridge until you automate Rakuten report import.
  */
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({} as any));
+  const contentType = req.headers.get("content-type") ?? "";
+  let body: Record<string, any> = {};
+
+  if (contentType.includes("application/json")) {
+    body = await req.json().catch(() => ({} as any));
+  } else if (
+    contentType.includes("application/x-www-form-urlencoded") ||
+    contentType.includes("multipart/form-data")
+  ) {
+    const form = await req.formData().catch(() => null);
+    if (form) {
+      for (const [key, value] of form.entries()) {
+        if (typeof value === "string") body[key] = value;
+      }
+    }
+  } else {
+    body = await req.json().catch(() => ({} as any));
+  }
 
   const cid = typeof body?.cid === "string" ? body.cid.trim() : "";
-  const commissionCents = Number.isFinite(body?.commissionCents) ? Number(body.commissionCents) : 0;
-  const saleAmountCents = Number.isFinite(body?.saleAmountCents) ? Number(body.saleAmountCents) : null;
+  const toNumberOrNull = (v: unknown) => {
+    if (v == null) return null;
+    if (typeof v === "string" && v.trim() === "") return null;
+    const n = typeof v === "number" ? v : Number(String(v));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const commissionCents = toNumberOrNull(body?.commissionCents) ?? 0;
+  const saleAmountCents = toNumberOrNull(body?.saleAmountCents);
   const occurredAt = body?.occurredAt ? new Date(body.occurredAt) : new Date();
 
   if (!cid) {

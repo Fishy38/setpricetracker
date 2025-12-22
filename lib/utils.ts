@@ -23,3 +23,8 @@ export function parsePriceToCents(raw: unknown): number | null {
   
     return null;
   }
+
+export function formatCentsUsd(cents: number | null | undefined): string {
+    if (cents == null) return "\u2014";
+    return `$${(cents / 100).toFixed(2)}`;
+}

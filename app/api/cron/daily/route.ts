@@ -112,14 +112,19 @@ export async function GET() {
   // If you want: run LEGO refresh for *all* sets daily.
   // This is usually what you mean by "update commands once every 24 hours".
   const jobs = [
-    // LEGO full refresh (use lego-all, NOT per-set lego route)
-    { name: "legoAll", path: "/api/refresh/lego-all?limit=2", method: "POST" as const, timeoutMs: 300_000 },
+    // LEGO full refresh (use lego refresh with all=1)
+    { name: "legoAll", path: "/api/refresh/lego?all=1&limit=2", method: "POST" as const, timeoutMs: 300_000 },
 
     // Giftcards refresh (purge=1 keeps DB clean; remove if you dislike)
     { name: "giftcards", path: "/api/refresh/giftcards?purge=1", method: "POST" as const, timeoutMs: 180_000 },
 
     // Rakuten refresh endpoint currently uses GET in your code
-    { name: "rakuten", path: "/api/admin/rakuten-refresh", method: "GET" as const, timeoutMs: 60_000 },
+    {
+      name: "rakuten",
+      path: "/api/admin/rakuten-refresh?timeoutMs=600000",
+      method: "GET" as const,
+      timeoutMs: 600_000,
+    },
   ];
 
   const results: Record<string, HitResult> = {};

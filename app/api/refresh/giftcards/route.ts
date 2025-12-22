@@ -234,3 +234,7 @@ export async function POST(req: Request) {
     sampleSkippedIds,
   });
 }
+
+export async function GET(req: Request) {
+  return POST(req);
+}

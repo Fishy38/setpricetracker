@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { formatCentsUsd } from "@/lib/utils";
 import {
   LineChart,
   Line,
@@ -24,11 +25,6 @@ type RangeKey = "1m" | "3m" | "6m" | "1y" | "all";
 function toMs(d: string | Date) {
   const t = d instanceof Date ? d.getTime() : new Date(d).getTime();
   return Number.isFinite(t) ? t : 0;
-}
-
-function fmtMoney(cents: number | null | undefined) {
-  if (cents == null) return "—";
-  return `$${(cents / 100).toFixed(2)}`;
 }
 
 function fmtDateShort(ms: number) {
@@ -172,15 +168,17 @@ export function PriceChart({ history }: { history: PriceHistoryRow[] }) {
           <div className="flex gap-4 text-sm">
             <div className="text-gray-400">
               Low{" "}
-              <span className="text-gray-200 font-semibold">{fmtMoney(stats.low)}</span>
+              <span className="text-gray-200 font-semibold">{formatCentsUsd(stats.low)}</span>
             </div>
             <div className="text-gray-400">
               High{" "}
-              <span className="text-gray-200 font-semibold">{fmtMoney(stats.high)}</span>
+              <span className="text-gray-200 font-semibold">{formatCentsUsd(stats.high)}</span>
             </div>
             <div className="text-gray-400">
               Latest{" "}
-              <span className="text-green-400 font-semibold">{fmtMoney(stats.latest)}</span>
+              <span className="text-green-400 font-semibold">
+                {formatCentsUsd(stats.latest)}
+              </span>
             </div>
           </div>
         )}

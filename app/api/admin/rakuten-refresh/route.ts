@@ -4,9 +4,13 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { execFile } from "child_process";
+import { existsSync } from "fs";
+import path from "path";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
+const NPX_CMD = process.platform === "win32" ? "npx.cmd" : "npx";
+const TSX_CLI = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.cjs");
 
 type CommandResult = {
   ok: boolean;
@@ -27,7 +31,6 @@ async function runCommand(opts: {
   try {
     const { stdout, stderr } = await execFileAsync(opts.cmd, opts.args, {
       timeout: opts.timeoutMs,
-      shell: true,
       maxBuffer: 10 * 1024 * 1024, // 10MB
     });
 
@@ -73,9 +76,10 @@ export async function POST(req: Request) {
     Math.min(20 * 60_000, Number(searchParams.get("timeoutMs") ?? 10 * 60_000))
   );
 
+  const useLocalTsx = existsSync(TSX_CLI);
   const result = await runCommand({
-    cmd: "npx",
-    args: ["tsx", "scripts/sync-rakuten.ts"],
+    cmd: useLocalTsx ? process.execPath : NPX_CMD,
+    args: useLocalTsx ? [TSX_CLI, "scripts/sync-rakuten.ts"] : ["tsx", "scripts/sync-rakuten.ts"],
     timeoutMs,
   });
 

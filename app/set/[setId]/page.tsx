@@ -2,16 +2,13 @@
 import Link from "next/link";
 import { PriceChart } from "@/app/components/PriceChart";
 import { prisma } from "@/lib/prisma";
+import { formatRetailerLabel, retailerKey, RAKUTEN_LEGO_RETAILER } from "@/lib/retailer";
 import { SETS } from "@/lib/sets";
 import { getServerOrigin } from "@/lib/server-origin";
+import { formatCentsUsd } from "@/lib/utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function formatCents(cents: number | null | undefined) {
-  if (cents == null) return "—";
-  return `$${(cents / 100).toFixed(2)}`;
-}
 
 function sortOffersByPrice(offers: any[]) {
   return [...(offers ?? [])].sort((a, b) => {
@@ -22,6 +19,47 @@ function sortOffersByPrice(offers: any[]) {
     if (bp == null) return -1;
     return ap - bp;
   });
+}
+
+function dedupeOffersByRetailer(offers: any[]) {
+  const seen = new Set<string>();
+  const out: any[] = [];
+
+  for (const o of offers ?? []) {
+    const key = o?.retailerKey ?? "";
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(o);
+  }
+
+  return out;
+}
+
+const LEGO_RETAILER = "LEGO";
+
+function mergeRakutenLegoOffer(offers: any[]) {
+  let rakuten: any = null;
+  const out: any[] = [];
+
+  for (const o of offers ?? []) {
+    const key = String(o?.retailer ?? "").trim().toUpperCase();
+    if (key === RAKUTEN_LEGO_RETAILER) {
+      rakuten = o;
+      continue;
+    }
+    out.push(o);
+  }
+
+  if (rakuten?.url) {
+    const legoIdx = out.findIndex(
+      (o) => String(o?.retailer ?? "").trim().toUpperCase() === LEGO_RETAILER
+    );
+    if (legoIdx >= 0) {
+      out[legoIdx] = { ...out[legoIdx], url: rakuten.url };
+    }
+  }
+
+  return out;
 }
 
 type PageProps = {
@@ -52,20 +90,26 @@ export default async function SetPage({ params }: PageProps) {
     );
   }
 
-  const offersSorted = sortOffersByPrice((set as any).offers ?? []);
+  const offersMerged = mergeRakutenLegoOffer((set as any).offers ?? []);
+  const offersSorted = sortOffersByPrice(offersMerged);
+
+  const offersNormalized = offersSorted.map((o: any) => ({
+    ...o,
+    retailerLabel: formatRetailerLabel(o?.retailer),
+    retailerKey: retailerKey(o?.retailer),
+  }));
 
   // ✅ lowest price wins, regardless of retailer:
   // - show only priced offers with URL
   // - prefer inStock !== false
-  const inStockOffers = offersSorted.filter(
+  const inStockOffers = offersNormalized.filter(
     (o: any) => o?.url && o?.price != null && o?.inStock !== false
   );
-  const fallbackOffers = offersSorted.filter((o: any) => o?.url && o?.price != null);
+  const fallbackOffers = offersNormalized.filter((o: any) => o?.url && o?.price != null);
 
-  const offersToShow = (inStockOffers.length ? inStockOffers : fallbackOffers).map((o: any) => ({
-    ...o,
-    retailer: String(o.retailer),
-  }));
+  const offersToShow = dedupeOffersByRetailer(
+    inStockOffers.length ? inStockOffers : fallbackOffers
+  );
 
   const origin = await getServerOrigin();
 
@@ -122,13 +166,15 @@ export default async function SetPage({ params }: PageProps) {
                   key={i}
                   href={`/out?u=${encodeURIComponent(o.url)}&setId=${encodeURIComponent(
                     setId
-                  )}&retailer=${encodeURIComponent(o.retailer)}&cid=${encodeURIComponent(cid)}`}
+                  )}&retailer=${encodeURIComponent(o.retailerLabel)}&cid=${encodeURIComponent(
+                    cid
+                  )}`}
                   target="_blank"
                   rel="noopener noreferrer nofollow sponsored"
                   className="flex justify-between items-center border border-gray-800 rounded-md px-4 py-3 hover:bg-gray-900"
                 >
                   <div>
-                    <div className="font-medium">{o.retailer}</div>
+                    <div className="font-medium">{o.retailerLabel}</div>
                     <div className="text-xs text-gray-500">
                       {o.inStock === false ? "Out of stock" : "Open deal"}
                     </div>
@@ -137,10 +183,12 @@ export default async function SetPage({ params }: PageProps) {
                   <div className="flex gap-2 items-center">
                     {showMsrpStrike && (
                       <span className="text-xs line-through text-gray-500">
-                        {formatCents(msrp)}
+                        {formatCentsUsd(msrp)}
                       </span>
                     )}
-                    <span className="text-green-400 font-semibold">{formatCents(o.price)}</span>
+                    <span className="text-green-400 font-semibold">
+                      {formatCentsUsd(o.price)}
+                    </span>
                   </div>
                 </a>
               );

@@ -4,6 +4,7 @@ import { fetchAllLegoProducts } from "@/lib/rakuten";
 import { parsePriceToCents } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import { classifyLegoProduct } from "@/lib/rakuten/shouldIncludeProduct";
+import { RAKUTEN_LEGO_RETAILER } from "@/lib/retailer";
 
 /**
  * IMPORTANT:
@@ -14,8 +15,6 @@ import { classifyLegoProduct } from "@/lib/rakuten/shouldIncludeProduct";
  * We store Rakuten's LEGO offer as retailer="RAKUTEN_LEGO" instead.
  * Then the app can pick the lowest price across retailers.
  */
-const RAKUTEN_LEGO_RETAILER = "RAKUTEN_LEGO";
-
 /**
  * ✅ Your DB currently does NOT have Set.productType / Set.setNumber columns.
  * If you later add them, set this env var to "1" to enable writing.
@@ -44,9 +43,10 @@ async function triggerLegoRefreshAfterSync() {
         : `https://${process.env.VERCEL_URL}`
       : "http://localhost:3000");
 
-  const url = new URL("/api/refresh/lego-all", base);
+  const url = new URL("/api/refresh/lego", base);
 
   // Optional knobs
+  url.searchParams.set("all", "1");
   url.searchParams.set("limit", "2"); // concurrency
   // url.searchParams.set("take", "200"); // only first N sets
 

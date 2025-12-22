@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { headers } from "next/headers";
+import { formatCentsUsd } from "@/lib/utils";
 
 type GiftCardRow = {
   id: string;
@@ -15,11 +16,6 @@ type GiftCardRow = {
   affiliateUrl: string | null;
   price: number | null; // cents
 };
-
-function money(cents?: number | null) {
-  if (cents == null) return "—";
-  return `$${(cents / 100).toFixed(2)}`;
-}
 
 async function getBaseUrlFromHeaders(): Promise<string | null> {
   const h = await headers();
@@ -115,7 +111,7 @@ export default async function GiftCardsPage() {
 
                 <div className="flex items-center justify-between mt-2">
                   <span className="text-green-400 font-semibold">
-                    {money(g.price)}
+                    {formatCentsUsd(g.price)}
                   </span>
                   <span className="text-xs text-gray-400">Open deal →</span>
                 </div>
