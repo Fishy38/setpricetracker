@@ -56,6 +56,11 @@ function mergeRakutenLegoOffer(offers: any[]) {
     );
     if (legoIdx >= 0) {
       out[legoIdx] = { ...out[legoIdx], url: rakuten.url };
+    } else {
+      out.push({
+        ...rakuten,
+        retailer: LEGO_RETAILER,
+      });
     }
   }
 
@@ -99,16 +104,22 @@ export default async function SetPage({ params }: PageProps) {
     retailerKey: retailerKey(o?.retailer),
   }));
 
-  // ✅ lowest price wins, regardless of retailer:
-  // - show only priced offers with URL
-  // - prefer inStock !== false
+  // lowest price wins, regardless of retailer:
+  // - prefer priced, in-stock offers with URL
+  // - fall back to priced offers
+  // - if no prices exist, still show linked offers
   const inStockOffers = offersNormalized.filter(
     (o: any) => o?.url && o?.price != null && o?.inStock !== false
   );
   const fallbackOffers = offersNormalized.filter((o: any) => o?.url && o?.price != null);
+  const linkedOffers = offersNormalized.filter((o: any) => o?.url);
 
   const offersToShow = dedupeOffersByRetailer(
-    inStockOffers.length ? inStockOffers : fallbackOffers
+    inStockOffers.length
+      ? inStockOffers
+      : fallbackOffers.length
+        ? fallbackOffers
+        : linkedOffers
   );
 
   const origin = await getServerOrigin();
