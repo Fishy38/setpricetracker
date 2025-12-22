@@ -271,6 +271,25 @@ export default async function AdminDashboardPage() {
               🎁 Refresh Gift Cards
             </button>
           </form>
+          <form action="/api/refresh/lego" method="GET">
+            <input type="hidden" name="all" value="1" />
+            <button
+              type="submit"
+              className="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 transition"
+            >
+              Refresh LEGO
+            </button>
+          </form>
+
+          <form action="/api/refresh/amazon" method="GET">
+            <input type="hidden" name="all" value="1" />
+            <button
+              type="submit"
+              className="bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 transition"
+            >
+              Refresh Amazon
+            </button>
+          </form>
         </div>
       </header>
 
@@ -318,6 +337,40 @@ export default async function AdminDashboardPage() {
                 className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
               >
                 Refresh All LEGO
+              </button>
+            </form>
+
+            <form action="/api/refresh/amazon" method="GET" className="flex flex-col sm:flex-row gap-2">
+              <input
+                name="setId"
+                placeholder="Amazon Set ID (e.g. 75394)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+              >
+                Refresh Amazon Set
+              </button>
+            </form>
+
+            <form action="/api/refresh/amazon" method="GET" className="flex flex-col sm:flex-row gap-2">
+              <input type="hidden" name="all" value="1" />
+              <input
+                name="limit"
+                placeholder="Concurrency (default 2)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <input
+                name="take"
+                placeholder="Take N (optional)"
+                className="flex-1 rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+              >
+                Refresh All Amazon
               </button>
             </form>
 

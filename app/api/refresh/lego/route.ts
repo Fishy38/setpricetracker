@@ -19,6 +19,15 @@ type RefreshResult = {
   error?: string;
 };
 
+export type RefreshAllResult = {
+  ok: boolean;
+  total: number;
+  refreshed: number;
+  failed: number;
+  results: RefreshResult[];
+  error?: string;
+};
+
 /**
  * Normalize stored LEGO URLs.
  * - If stored URL is a Rakuten LinkShare click url (linksynergy), extract `murl`.
@@ -130,9 +139,12 @@ function availabilityToInStock(v: unknown): boolean | null {
 async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
   const { setId, legoUrl } = input;
 
+  console.log(`[LEGO_REFRESH] start setId=${setId}`);
+
   const fetchUrl = normalizeLegoUrl(legoUrl);
 
   if (!fetchUrl) {
+    console.warn(`[LEGO_REFRESH] skip setId=${setId} reason=invalid legoUrl`);
     return { setId, ok: false, error: "Missing/invalid legoUrl", legoUrl, priceCents: null, inStock: null };
   }
 
@@ -148,6 +160,7 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
   });
 
   if (!res.ok) {
+    console.warn(`[LEGO_REFRESH] fetch failed setId=${setId} status=${res.status}`);
     return {
       setId,
       ok: false,
@@ -165,6 +178,11 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
   const priceCents = parsePriceToCents(found?.price);
   const availability = availabilityToInStock(found?.availability);
   const inStock = availability ?? (priceCents != null ? true : null);
+  console.log(
+    `[LEGO_REFRESH] parsed setId=${setId} priceCents=${priceCents ?? "null"} inStock=${
+      inStock ?? "null"
+    }`
+  );
 
   await prisma.offer.upsert({
     where: { setIdRef_retailer: { setIdRef: setId, retailer: LEGO_RETAILER } },
@@ -214,6 +232,7 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
     // don't fail the refresh if this update fails
   }
 
+  console.log(`[LEGO_REFRESH] done setId=${setId}`);
   return { setId, ok: true, legoUrl: fetchUrl, priceCents, inStock };
 }
 
@@ -234,6 +253,69 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
+export async function refreshLegoSet(setId: string): Promise<RefreshResult> {
+  const set = await prisma.set.findUnique({ where: { setId } });
+
+  if (!set?.legoUrl) {
+    return {
+      setId,
+      ok: false,
+      error: "No legoUrl stored for this setId",
+      legoUrl: set?.legoUrl ?? "",
+      priceCents: null,
+      inStock: null,
+    };
+  }
+
+  return refreshOne({ setId, legoUrl: set.legoUrl });
+}
+
+export async function refreshLegoAll(params: { limit: number; take: number }): Promise<RefreshAllResult> {
+  const { limit, take } = params;
+
+  try {
+    const sets = await prisma.set.findMany({
+      orderBy: { setId: "asc" },
+      ...(take > 0 ? { take } : {}),
+      select: { setId: true, legoUrl: true },
+    });
+
+    const inputs: RefreshInput[] = sets
+      .filter((s) => typeof s.legoUrl === "string" && (s.legoUrl as string).length)
+      .map((s) => ({ setId: s.setId, legoUrl: s.legoUrl as string }));
+
+    console.log(
+      `[LEGO_REFRESH] bulk start total=${inputs.length} limit=${limit} take=${take}`
+    );
+    const results = await mapLimit(inputs, limit, refreshOne);
+
+    const ok = results.filter((r) => r.ok).length;
+    const failed = results.length - ok;
+
+    console.log(
+      `[LEGO_REFRESH] bulk done refreshed=${ok} failed=${failed} total=${results.length}`
+    );
+
+    return {
+      ok: true,
+      total: results.length,
+      refreshed: ok,
+      failed,
+      results,
+    };
+  } catch (err: any) {
+    console.error("[LEGO_REFRESH] bulk error", err);
+    return {
+      ok: false,
+      total: 0,
+      refreshed: 0,
+      failed: 0,
+      results: [],
+      error: err?.message ?? String(err),
+    };
+  }
+}
+
 export async function POST(req: Request) {
   const { searchParams } = new URL(req.url);
   const setId = (searchParams.get("setId") ?? "").trim();
@@ -242,16 +324,7 @@ export async function POST(req: Request) {
   );
 
   if (setId) {
-    const set = await prisma.set.findUnique({ where: { setId } });
-
-    if (!set?.legoUrl) {
-      return NextResponse.json(
-        { ok: false, error: "No legoUrl stored for this setId" },
-        { status: 400 }
-      );
-    }
-
-    const result = await refreshOne({ setId, legoUrl: set.legoUrl });
+    const result = await refreshLegoSet(setId);
     if (!result.ok) {
       const status = result.error?.startsWith("LEGO fetch failed") ? 502 : 400;
       return NextResponse.json(
@@ -289,28 +362,9 @@ export async function POST(req: Request) {
   const takeRaw = Number(searchParams.get("take") ?? 0);
   const take = Number.isFinite(takeRaw) ? Math.max(0, Math.floor(takeRaw)) : 0; // take first N sets (0 = all)
 
-  const sets = await prisma.set.findMany({
-    orderBy: { setId: "asc" },
-    ...(take > 0 ? { take } : {}),
-    select: { setId: true, legoUrl: true },
-  });
-
-  const inputs: RefreshInput[] = sets
-    .filter((s) => typeof s.legoUrl === "string" && (s.legoUrl as string).length)
-    .map((s) => ({ setId: s.setId, legoUrl: s.legoUrl as string }));
-
-  const results = await mapLimit(inputs, limit, refreshOne);
-
-  const ok = results.filter((r) => r.ok).length;
-  const failed = results.length - ok;
-
-  return NextResponse.json({
-    ok: true,
-    total: results.length,
-    refreshed: ok,
-    failed,
-    results,
-  });
+  const bulk = await refreshLegoAll({ limit, take });
+  const status = bulk.ok ? 200 : 502;
+  return NextResponse.json(bulk, { status });
 }
 
 export async function GET(req: Request) {

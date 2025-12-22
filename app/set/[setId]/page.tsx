@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PriceChart } from "@/app/components/PriceChart";
 import { prisma } from "@/lib/prisma";
 import { formatRetailerLabel, retailerKey, RAKUTEN_LEGO_RETAILER } from "@/lib/retailer";
+import { applyAmazonSitestripeToOffers } from "@/lib/amazon-sitestripe";
 import { SETS } from "@/lib/sets";
 import { getServerOrigin } from "@/lib/server-origin";
 import { formatCentsUsd } from "@/lib/utils";
@@ -10,10 +11,17 @@ import { formatCentsUsd } from "@/lib/utils";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function sortOffersByPrice(offers: any[]) {
+function offerDisplayPriceCents(offer: any, msrp: number | null) {
+  const price = offer?.price;
+  if (typeof price === "number") return price;
+  if (offer?.retailerKey === "AMAZON" && typeof msrp === "number") return msrp;
+  return null;
+}
+
+function sortOffersByDisplayPrice(offers: any[], msrp: number | null) {
   return [...(offers ?? [])].sort((a, b) => {
-    const ap = a?.price ?? null;
-    const bp = b?.price ?? null;
+    const ap = offerDisplayPriceCents(a, msrp);
+    const bp = offerDisplayPriceCents(b, msrp);
     if (ap == null && bp == null) return 0;
     if (ap == null) return 1;
     if (bp == null) return -1;
@@ -95,31 +103,36 @@ export default async function SetPage({ params }: PageProps) {
     );
   }
 
-  const offersMerged = mergeRakutenLegoOffer((set as any).offers ?? []);
-  const offersSorted = sortOffersByPrice(offersMerged);
-
-  const offersNormalized = offersSorted.map((o: any) => ({
+  const msrp = typeof (set as any).msrp === "number" ? (set as any).msrp : null;
+  const offersMerged = applyAmazonSitestripeToOffers(
+    mergeRakutenLegoOffer((set as any).offers ?? []),
+    setId
+  );
+  const offersNormalized = offersMerged.map((o: any) => ({
     ...o,
     retailerLabel: formatRetailerLabel(o?.retailer),
     retailerKey: retailerKey(o?.retailer),
   }));
+  const offersSorted = sortOffersByDisplayPrice(offersNormalized, msrp);
 
   // lowest price wins, regardless of retailer:
   // - prefer priced, in-stock offers with URL
   // - fall back to priced offers
   // - if no prices exist, still show linked offers
-  const inStockOffers = offersNormalized.filter(
+  const inStockOffers = offersSorted.filter(
     (o: any) => o?.url && o?.price != null && o?.inStock !== false
   );
-  const fallbackOffers = offersNormalized.filter((o: any) => o?.url && o?.price != null);
-  const linkedOffers = offersNormalized.filter((o: any) => o?.url);
+  const fallbackOffers = offersSorted.filter((o: any) => o?.url && o?.price != null);
+  const linkedOffers = offersSorted.filter((o: any) => o?.url);
+
+  const baseOffers =
+    inStockOffers.length ? inStockOffers : fallbackOffers.length ? fallbackOffers : linkedOffers;
+  const amazonOffer = linkedOffers.find((o: any) => o?.retailerKey === "AMAZON");
 
   const offersToShow = dedupeOffersByRetailer(
-    inStockOffers.length
-      ? inStockOffers
-      : fallbackOffers.length
-        ? fallbackOffers
-        : linkedOffers
+    amazonOffer && !baseOffers.some((o: any) => o?.retailerKey === "AMAZON")
+      ? [...baseOffers, amazonOffer]
+      : baseOffers
   );
 
   const origin = await getServerOrigin();
@@ -168,9 +181,10 @@ export default async function SetPage({ params }: PageProps) {
                   ? crypto.randomUUID()
                   : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-              const msrp = (set as any).msrp ?? null;
               const showMsrpStrike =
                 typeof msrp === "number" && typeof o.price === "number" && msrp > o.price;
+              const priceForDisplay =
+                o.price == null && o.retailerKey === "AMAZON" ? msrp : o.price;
 
               return (
                 <a
@@ -198,7 +212,7 @@ export default async function SetPage({ params }: PageProps) {
                       </span>
                     )}
                     <span className="text-green-400 font-semibold">
-                      {formatCentsUsd(o.price)}
+                      {formatCentsUsd(priceForDisplay)}
                     </span>
                   </div>
                 </a>

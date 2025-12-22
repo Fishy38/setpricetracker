@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { RAKUTEN_LEGO_RETAILER } from "@/lib/retailer";
+import { applyAmazonSitestripeToOffers } from "@/lib/amazon-sitestripe";
 
 type ShapedOffer = {
   retailer: string;
@@ -69,6 +70,24 @@ function pickBestOffer(offers: ShapedOffer[]): ShapedOffer | null {
   });
 
   return pool[0] ?? null;
+}
+
+function offerDisplayPriceCents(offer: ShapedOffer, msrp: number | null) {
+  if (typeof offer.price === "number") return offer.price;
+  const key = String(offer.retailer ?? "").trim().toUpperCase();
+  if (key === "AMAZON" && typeof msrp === "number") return msrp;
+  return null;
+}
+
+function sortOffersByDisplayPrice(offers: ShapedOffer[], msrp: number | null): ShapedOffer[] {
+  return [...(offers ?? [])].sort((a, b) => {
+    const ap = offerDisplayPriceCents(a, msrp);
+    const bp = offerDisplayPriceCents(b, msrp);
+    if (ap == null && bp == null) return 0;
+    if (ap == null) return 1;
+    if (bp == null) return -1;
+    return ap - bp;
+  });
 }
 
 function computeDiscount(msrp: number | null, bestPrice: number | null) {
@@ -347,11 +366,16 @@ export async function GET(req: Request) {
         updatedAt: (o.updatedAt as Date) ?? null,
       }));
 
-      const offers = mergeRakutenLegoOffer(offersRaw);
+      const offers = applyAmazonSitestripeToOffers(
+        mergeRakutenLegoOffer(offersRaw),
+        String(s.setId)
+      );
+      const msrpCents = typeof s.msrp === "number" ? s.msrp : null;
+      const offersSorted = sortOffersByDisplayPrice(offers, msrpCents);
 
-      const bestOffer = pickBestOffer(offers);
+      const bestOffer = pickBestOffer(offersSorted);
       const { discountCents, discountPct } = computeDiscount(
-        typeof s.msrp === "number" ? s.msrp : null,
+        msrpCents,
         bestOffer?.price ?? null
       );
 
@@ -361,8 +385,8 @@ export async function GET(req: Request) {
         setId: String(s.setId),
         name: s.name ?? null,
         imageUrl: String(s.imageUrl),
-        msrp: typeof s.msrp === "number" ? s.msrp : null,
-        offers,
+        msrp: msrpCents,
+        offers: offersSorted,
         bestOffer,
         discountCents,
         discountPct,

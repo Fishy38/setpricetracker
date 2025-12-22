@@ -6,12 +6,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { SETS } from "@/lib/sets";
 import {
-  amazonSearchUrl,
   walmartSearchUrl,
   targetSearchUrl,
   legoSearchUrl,
   legoAffiliateUrlFromProductPage,
 } from "@/lib/affiliate";
+import { getAmazonSitestripeUrl } from "@/lib/amazon-sitestripe";
 import { parsePriceToCents } from "@/lib/utils";
 type Retailer = string;
 
@@ -123,9 +123,13 @@ export async function POST(req: Request) {
     }
 
     // 3) Upsert Offers + Conditional PriceHistory insert
+    const amazonSitestripeUrl = getAmazonSitestripeUrl(setId);
+
     const offers: { retailer: Retailer; url: string; price: number | null }[] = [
       { retailer: "LEGO", url: legoAffiliateUrl!, price: msrpCents },
-      { retailer: "Amazon", url: amazonSearchUrl(setId), price: null },
+      ...(amazonSitestripeUrl
+        ? [{ retailer: "Amazon", url: amazonSitestripeUrl, price: null }]
+        : []),
       { retailer: "Walmart", url: walmartSearchUrl(setId), price: null },
       { retailer: "Target", url: targetSearchUrl(setId), price: null },
     ];

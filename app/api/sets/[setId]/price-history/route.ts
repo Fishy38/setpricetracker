@@ -30,7 +30,7 @@ export async function GET(
     const url = new URL(req.url);
     const retailerParam = safeRetailer(url.searchParams.get("retailer"));
 
-    let history = [];
+    let history: any[] = [];
 
     if (retailerParam) {
       history = await prisma.priceHistory.findMany({
@@ -38,17 +38,29 @@ export async function GET(
         orderBy: { recordedAt: "asc" },
       });
     } else {
-      history = await prisma.priceHistory.findMany({
-        where: { setIdRef: setId, retailer: "LEGO" },
+      const all = await prisma.priceHistory.findMany({
+        where: { setIdRef: setId, retailer: { not: RAKUTEN_LEGO_RETAILER } },
         orderBy: { recordedAt: "asc" },
       });
 
-      if (history.length === 0) {
-        history = await prisma.priceHistory.findMany({
-          where: { setIdRef: setId, retailer: { not: RAKUTEN_LEGO_RETAILER } },
-          orderBy: { recordedAt: "asc" },
-        });
+      const byDay = new Map<string, (typeof all)[number]>();
+      for (const row of all) {
+        const price = typeof row.price === "number" ? row.price : null;
+        if (price == null) continue;
+
+        const d = new Date(row.recordedAt);
+        const dayKey = Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : "";
+        if (!dayKey) continue;
+
+        const existing = byDay.get(dayKey);
+        if (!existing || (existing.price ?? Number.POSITIVE_INFINITY) > price) {
+          byDay.set(dayKey, row);
+        }
       }
+
+      history = Array.from(byDay.values()).sort(
+        (a, b) => new Date(a.recordedAt).getTime() - new Date(b.recordedAt).getTime()
+      );
     }
 
     return NextResponse.json({
