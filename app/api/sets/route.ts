@@ -16,15 +16,12 @@ type ShapedOffer = {
 function pickBestOffer(offers: ShapedOffer[]): ShapedOffer | null {
   if (!offers?.length) return null;
 
-  // Prefer: has price + not explicitly out of stock
   const priced = offers.filter((o) => typeof o.price === "number" && o.price != null);
-
   const inStockPriced = priced.filter((o) => o.inStock !== false);
   const pool = inStockPriced.length ? inStockPriced : priced;
 
   if (!pool.length) return null;
 
-  // lowest price wins, then newest updatedAt
   pool.sort((a, b) => {
     const ap = a.price ?? Number.POSITIVE_INFINITY;
     const bp = b.price ?? Number.POSITIVE_INFINITY;
@@ -58,10 +55,8 @@ function norm(s: string | null | undefined) {
   return String(s ?? "").trim().toLowerCase();
 }
 
-// Anything matching these stays in MERCH.
-// Everything else (that isn't explicitly typed) becomes SET by default.
+// Merch keywords (what should NOT be on the main set page)
 const MERCH_KEYWORDS = [
-  // Bags / apparel
   "backpack",
   "bag",
   "lunch bag",
@@ -85,8 +80,6 @@ const MERCH_KEYWORDS = [
   "pants",
   "shorts",
   "socks",
-
-  // Books / puzzles / media
   "book",
   "books",
   "puzzle",
@@ -97,16 +90,12 @@ const MERCH_KEYWORDS = [
   "comic",
   "journal",
   "notebook",
-
-  // Storage / home goods (these are NOT “sets” in your UI)
   "storage",
   "drawer",
   "box",
   "bin",
   "organizer",
   "luggage",
-
-  // Accessories / home
   "key chain",
   "keychain",
   "lamp",
@@ -115,39 +104,24 @@ const MERCH_KEYWORDS = [
   "tumbler",
 ];
 
-function inferType(row: {
-  setId: string;
-  name?: string | null;
-  productType?: string | null;
-  setNumber?: string | null;
-}) {
-  const id = String(row.setId ?? "");
+// IMPORTANT: since you said “parts is gone”, we only classify SET vs MERCH now.
+function inferType(row: { setId: string; name?: string | null }) {
+  const id = String(row.setId ?? "").trim();
   const name = norm(row.name);
-  const pt = norm(row.productType);
-  const setNumber = norm(row.setNumber);
 
-  // If DB has explicit classification, trust it
-  if (pt === "set") return "SET";
-  if (pt === "merch") return "MERCH";
-  if (pt === "other") return "MERCH";
-
-  // If setNumber exists and looks like a real LEGO set number, it's a set
-  if (setNumber && isRealSetId(setNumber)) return "SET";
-
-  // If setId itself is numeric, it's a set
+  // Real LEGO set numbers / numeric IDs: treat as SET
   if (isRealSetId(id)) return "SET";
 
-  // Merch overrides everything (bags/books/storage/etc)
+  // Everything else: merch
+  // (We still keep keywords here in case you later want to split merch categories)
   if (MERCH_KEYWORDS.some((k) => name.includes(k))) return "MERCH";
 
-  // ✅ IMPORTANT CHANGE:
-  // Default non-merch items to SET (because you said there are no real parts — everything else is sets)
-  return "SET";
+  return "MERCH";
 }
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const type = (searchParams.get("type") ?? "").toUpperCase(); // "SET" | "MERCH"
+  const type = (searchParams.get("type") ?? "").toUpperCase(); // "SET" | "MERCH" | etc.
 
   try {
     const rows = await prisma.set.findMany({
@@ -157,8 +131,6 @@ export async function GET(req: Request) {
         name: true,
         imageUrl: true,
         msrp: true,
-        productType: true,
-        setNumber: true,
         offers: {
           select: {
             retailer: true,
@@ -187,12 +159,7 @@ export async function GET(req: Request) {
         bestOffer?.price ?? null
       );
 
-      const inferred = inferType({
-        setId: String(s.setId),
-        name: s.name ?? null,
-        productType: (s as any).productType ?? null,
-        setNumber: (s as any).setNumber ?? null,
-      });
+      const inferredType = inferType({ setId: String(s.setId), name: s.name ?? null });
 
       return {
         setId: String(s.setId),
@@ -203,32 +170,17 @@ export async function GET(req: Request) {
         bestOffer,
         discountCents,
         discountPct,
-        productType: (s as any).productType ?? null,
-        setNumber: (s as any).setNumber ?? null,
-        inferredType: inferred,
+        inferredType,
       };
     });
 
-    if (type === "SET") {
-      return NextResponse.json(shaped.filter((x) => x.inferredType === "SET"));
-    }
-
-    if (type === "MERCH") {
-      return NextResponse.json(shaped.filter((x) => x.inferredType === "MERCH"));
-    }
-
-    // Backwards compat: if anything still calls PART/PARTS, treat as empty
-    if (type === "PART" || type === "PARTS") {
-      return NextResponse.json([]);
-    }
+    if (type === "SET") return NextResponse.json(shaped.filter((x) => x.inferredType === "SET"));
+    if (type === "MERCH") return NextResponse.json(shaped.filter((x) => x.inferredType === "MERCH"));
 
     return NextResponse.json(shaped);
   } catch (err: any) {
     return NextResponse.json(
-      {
-        error: "Failed to load sets",
-        detail: String(err?.message ?? err),
-      },
+      { error: "Failed to load sets", detail: String(err?.message ?? err) },
       { status: 500 }
     );
   }

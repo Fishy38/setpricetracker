@@ -3,7 +3,28 @@ import "dotenv/config";
 import { fetchAllLegoProducts } from "@/lib/rakuten";
 import { parsePriceToCents } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
-import { isBuildableLegoSet } from "@/lib/rakuten/shouldIncludeProduct";
+import { classifyLegoProduct } from "@/lib/rakuten/shouldIncludeProduct";
+
+/**
+ * IMPORTANT:
+ * - Rakuten feed often shows MSRP and may not reflect lego.com discounts.
+ * - DO NOT write Rakuten pricing into retailer="LEGO" because that will overwrite
+ *   the lego.com scraper's discount price.
+ *
+ * We store Rakuten's LEGO offer as retailer="RAKUTEN_LEGO" instead.
+ * Then the app can pick the lowest price across retailers.
+ */
+const RAKUTEN_LEGO_RETAILER = "RAKUTEN_LEGO";
+
+/**
+ * ✅ Your DB currently does NOT have Set.productType / Set.setNumber columns.
+ * If you later add them, set this env var to "1" to enable writing.
+ *
+ * Examples:
+ *  - SET_HAS_CLASSIFICATION_COLUMNS=1
+ */
+const SET_HAS_CLASSIFICATION_COLUMNS =
+  String(process.env.SET_HAS_CLASSIFICATION_COLUMNS ?? "").trim() === "1";
 
 /**
  * Trigger LEGO scrape refresh after Rakuten sync finishes.
@@ -45,15 +66,14 @@ async function triggerLegoRefreshAfterSync() {
 
     const data = await res.json().catch(() => ({}));
     console.log("✅ LEGO refresh finished:", {
-      total: data?.total,
-      refreshed: data?.refreshed,
-      failed: data?.failed,
+      total: (data as any)?.total,
+      refreshed: (data as any)?.refreshed,
+      failed: (data as any)?.failed,
     });
   } catch (err: any) {
     const msg = String(err?.message ?? err);
 
     // If your Next server isn't running locally, don't fail the whole sync.
-    // (Common when you run the script standalone.)
     if (
       msg.includes("ECONNREFUSED") ||
       msg.includes("fetch failed") ||
@@ -152,7 +172,7 @@ function extractSetNumberFromName(name: string | null): string | null {
   return null;
 }
 
-function getSetId(item: any, legoUrl: string | null, name: string | null): string | null {
+function getSetIdCandidate(item: any, legoUrl: string | null, name: string | null): string | null {
   const upc = asFirstString(item?.upccode)?.trim() ?? null;
   const sku = asFirstString(item?.sku)?.trim() ?? null;
 
@@ -174,18 +194,29 @@ function getImageUrl(item: any): string | null {
  * Rakuten gives linkurl; we treat that as outbound affiliate-ish link.
  * For scraping, we normalize to the real lego.com URL via murl.
  */
-function getLegoUrl(item: any): string | null {
+function getRakutenLinkUrl(item: any): string | null {
   return asFirstString(item?.linkurl)?.trim() ?? null;
 }
 
 function getRawPrice(item: any): string | null {
-  const p0 = item?.price?.[0];
-  const p = p0?._ ?? p0 ?? item?.price?._ ?? item?.price ?? null;
+  const p0 = (item as any)?.price?.[0];
+  const p = (p0 as any)?._ ?? p0 ?? (item as any)?.price?._ ?? (item as any)?.price ?? null;
   return p == null ? null : String(p).trim();
+}
+
+function getRakutenProductId(item: any): string | null {
+  return asFirstString(item?.productid)?.trim() ?? null;
 }
 
 function logSkip(reason: string, name: string | null, extra?: any) {
   console.warn(`⛔ Skipped (${reason}): ${name ?? "(no name)"}`, extra ?? "");
+}
+
+function makeNonSetId(rakutenProductId: string | null, sku: string | null, upc: string | null) {
+  if (rakutenProductId) return `rk-${rakutenProductId}`;
+  if (sku) return `rk-sku-${sku}`;
+  if (upc) return `rk-upc-${upc}`;
+  return `rk-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 async function main() {
@@ -194,16 +225,17 @@ async function main() {
   const products = await fetchAllLegoProducts();
   const list = typeof limit === "number" ? products.slice(0, limit) : products;
 
+  // Track last known state based on priceHistory for the Rakuten retailer label
   const lastState = new Map<string, { price: number | null; inStock: boolean | null }>();
 
   const existing = await prisma.priceHistory.findMany({
-    where: { retailer: "LEGO" },
+    where: { retailer: RAKUTEN_LEGO_RETAILER },
     orderBy: { recordedAt: "desc" },
     select: { setIdRef: true, price: true, inStock: true },
   });
 
   for (const row of existing) {
-    const key = `${row.setIdRef}::LEGO`;
+    const key = `${row.setIdRef}::${RAKUTEN_LEGO_RETAILER}`;
     if (!lastState.has(key)) {
       lastState.set(key, { price: row.price, inStock: row.inStock });
     }
@@ -218,39 +250,42 @@ async function main() {
     const name = getName(item);
     const imageUrl = getImageUrl(item);
 
-    const rakutenLinkUrl = getLegoUrl(item); // outbound link (often contains murl)
-    const canonicalUrl = rakutenLinkUrl ? extractMurl(rakutenLinkUrl) ?? rakutenLinkUrl : null; // real lego.com
+    const rakutenLinkUrl = getRakutenLinkUrl(item);
+    const canonicalUrl = rakutenLinkUrl ? extractMurl(rakutenLinkUrl) ?? rakutenLinkUrl : null;
 
-    // Use canonical URL for extracting set ID (more stable)
-    const setId = getSetId(item, canonicalUrl, name);
+    const rakutenProductId = getRakutenProductId(item);
+    const sku = asFirstString((item as any)?.sku)?.trim() ?? null;
+    const upc = asFirstString((item as any)?.upccode)?.trim() ?? null;
+
+    const setIdCandidate = getSetIdCandidate(item, canonicalUrl, name);
 
     const rawPrice = getRawPrice(item);
     const priceCents = parsePriceToCents(rawPrice);
     const inStock = priceCents !== null;
 
-    const decision = isBuildableLegoSet({
+    // ✅ classify (used for picking a stable ID); only written to DB if columns exist
+    const classified = classifyLegoProduct({
       title: name,
-      brand: asFirstString(item?.brand) ?? null,
-      setId,
-      categoryName: asFirstString(item?.categoryname) ?? asFirstString(item?.category) ?? null,
-      categoryPath: asFirstString(item?.categorypath) ?? null,
+      brand: asFirstString((item as any)?.brand) ?? null,
+      setId: setIdCandidate,
+      categoryName: asFirstString((item as any)?.categoryname) ?? asFirstString((item as any)?.category) ?? null,
+      categoryPath: asFirstString((item as any)?.categorypath) ?? null,
     });
 
-    if (!decision.ok) {
-      logSkip(`filter:${decision.reason}`, name);
-      skipped++;
-      continue;
-    }
+    const productType = classified.type;
 
-    const finalSetId = decision.setNumber ?? setId;
+    const finalSetId =
+      productType === "SET" && classified.setNumber
+        ? classified.setNumber
+        : makeNonSetId(rakutenProductId, sku, upc);
 
     if (!finalSetId || !imageUrl) {
-      logSkip("missing-data", name, { finalSetId, imageUrl });
+      logSkip("missing-data", name, { finalSetId, imageUrl, productType, rakutenProductId, sku, upc });
       skipped++;
       continue;
     }
 
-    const key = `${finalSetId}::LEGO`;
+    const key = `${finalSetId}::${RAKUTEN_LEGO_RETAILER}`;
     const prev = lastState.get(key);
     const changed = !prev || prev.price !== priceCents || prev.inStock !== inStock;
 
@@ -260,45 +295,60 @@ async function main() {
     }
 
     if (dryRun) {
-      console.log(`🧪 Dry-run: ${finalSetId} | ${priceCents ?? "null"}c`);
+      console.log(
+        `🧪 Dry-run: ${finalSetId} | ${productType} | ${priceCents ?? "null"}c (${RAKUTEN_LEGO_RETAILER})`
+      );
       lastState.set(key, { price: priceCents, inStock });
       synced++;
       continue;
     }
 
     await prisma.$transaction(async (tx) => {
-      // ✅ DO NOT TOUCH MSRP — EVER
-      // Set.legoUrl/canonicalUrl should be the REAL lego.com URL so /api/refresh/lego works.
-      await tx.set.upsert({
-        where: { setId: finalSetId },
-        update: {
-          name,
-          imageUrl,
-          legoUrl: canonicalUrl,
-          canonicalUrl: canonicalUrl,
-          advertiserId: process.env.RAKUTEN_LEGO_MID ?? null,
-          lastSyncedAt: new Date(),
-        },
-        create: {
-          setId: finalSetId,
-          name,
-          imageUrl,
-          legoUrl: canonicalUrl,
-          canonicalUrl: canonicalUrl,
-          advertiserId: process.env.RAKUTEN_LEGO_MID ?? null,
-          lastSyncedAt: new Date(),
-        },
-      });
-
       // Offer.url should be the OUTBOUND link users click.
-      // Prefer Rakuten linkurl; if missing, fall back to canonical.
       const outboundUrl = rakutenLinkUrl ?? canonicalUrl ?? null;
 
+      // ✅ Build update/create payloads WITHOUT classification unless DB has columns
+      const baseUpdate: any = {
+        name,
+        imageUrl,
+        legoUrl: canonicalUrl,
+        canonicalUrl: canonicalUrl,
+        advertiserId: process.env.RAKUTEN_LEGO_MID ?? null,
+        lastSyncedAt: new Date(),
+        rakutenProductId: rakutenProductId ?? null,
+      };
+
+      const baseCreate: any = {
+        setId: finalSetId,
+        name,
+        imageUrl,
+        legoUrl: canonicalUrl,
+        canonicalUrl: canonicalUrl,
+        advertiserId: process.env.RAKUTEN_LEGO_MID ?? null,
+        lastSyncedAt: new Date(),
+        rakutenProductId: rakutenProductId ?? null,
+      };
+
+      if (SET_HAS_CLASSIFICATION_COLUMNS) {
+        baseUpdate.productType = productType;
+        baseUpdate.setNumber = productType === "SET" ? (classified.setNumber ?? finalSetId) : null;
+
+        baseCreate.productType = productType;
+        baseCreate.setNumber = productType === "SET" ? (classified.setNumber ?? finalSetId) : null;
+      }
+
+      await tx.set.upsert({
+        where: { setId: finalSetId },
+        update: baseUpdate,
+        create: baseCreate,
+      });
+
+      // ✅ store Rakuten in its own retailer label so it can't overwrite lego.com scraped price
       await tx.offer.upsert({
         where: {
           setIdRef_retailer: {
             setIdRef: finalSetId,
-            retailer: "LEGO",
+            retailer: RAKUTEN_LEGO_RETAILER,
           },
         },
         update: {
@@ -309,7 +359,7 @@ async function main() {
         },
         create: {
           setIdRef: finalSetId,
-          retailer: "LEGO",
+          retailer: RAKUTEN_LEGO_RETAILER,
           price: priceCents,
           url: outboundUrl,
           inStock,
@@ -319,7 +369,7 @@ async function main() {
       await tx.priceHistory.create({
         data: {
           setIdRef: finalSetId,
-          retailer: "LEGO",
+          retailer: RAKUTEN_LEGO_RETAILER,
           price: priceCents,
           inStock,
         },
@@ -331,7 +381,9 @@ async function main() {
     lastState.set(key, { price: priceCents, inStock });
 
     if (verbose) {
-      console.log(`✅ Synced: ${finalSetId} | ${priceCents ?? "null"}c`);
+      console.log(
+        `✅ Synced: ${finalSetId} | ${productType} | ${priceCents ?? "null"}c (${RAKUTEN_LEGO_RETAILER})`
+      );
     }
   }
 
@@ -339,7 +391,6 @@ async function main() {
     `✅ Rakuten sync complete: synced=${synced}, skipped=${skipped}, noChange=${noChange}, priceHistoryInserted=${createdHistory}`
   );
 
-  // ✅ literally "at the end of main": after sync completes
   await triggerLegoRefreshAfterSync();
 }
 
