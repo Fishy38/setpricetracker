@@ -335,6 +335,9 @@ function inferType(row: { setId: string; name?: string | null }) {
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const type = (searchParams.get("type") ?? "").toUpperCase(); // "SET" | "MERCH" | etc.
+  const cacheHeaders = {
+    "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+  };
 
   try {
     const rows = await prisma.set.findMany({
@@ -394,13 +397,17 @@ export async function GET(req: Request) {
       };
     });
 
-    if (type === "SET") return NextResponse.json(shaped.filter((x) => x.inferredType === "SET"));
+    if (type === "SET") {
+      return NextResponse.json(shaped.filter((x) => x.inferredType === "SET"), {
+        headers: cacheHeaders,
+      });
+    }
     if (type === "MERCH") {
       const merch = shaped.filter((x) => x.inferredType === "MERCH");
-      return NextResponse.json(dedupeMerchClothing(merch));
+      return NextResponse.json(dedupeMerchClothing(merch), { headers: cacheHeaders });
     }
 
-    return NextResponse.json(shaped);
+    return NextResponse.json(shaped, { headers: cacheHeaders });
   } catch (err: any) {
     return NextResponse.json(
       { error: "Failed to load sets", detail: String(err?.message ?? err) },

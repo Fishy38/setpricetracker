@@ -54,6 +54,32 @@ type SortKey = "biggestDiscount" | "lowestPrice" | "highestPrice" | "setId";
 
 const PAGE_SIZE = 80;
 const DEFAULT_SORT: SortKey = "biggestDiscount";
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+function readCache<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { t?: number; data?: T } | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const ts = Number(parsed.t);
+    if (!Number.isFinite(ts)) return null;
+    if (Date.now() - ts > CACHE_TTL_MS) return null;
+    return parsed.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache<T>(key: string, data: T) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ t: Date.now(), data }));
+  } catch {
+    // ignore cache write errors
+  }
+}
 
 type CategorySlug =
   | "all"
@@ -324,8 +350,19 @@ export default function HomeClient({
 
   useEffect(() => {
     (async () => {
+      const cacheKey = `sets-cache:${type}`;
+      const cached = readCache<ApiSetRow[]>(cacheKey);
+      const cachedHasData = Array.isArray(cached) && cached.length > 0;
+
+      if (cachedHasData) {
+        setSets(normalizeSets(cached as ApiSetRow[]));
+        setLoading(false);
+      }
+
       try {
-        const res = await fetch(`/api/sets?type=${encodeURIComponent(type)}`, { cache: "no-store" });
+        const res = await fetch(`/api/sets?type=${encodeURIComponent(type)}`, {
+          cache: "force-cache",
+        });
         if (!res.ok) throw new Error("bad response");
         const data = (await res.json()) as ApiSetRow[];
 
@@ -333,11 +370,12 @@ export default function HomeClient({
 
         if (normalized.length) {
           setSets(normalized);
+          writeCache(cacheKey, Array.isArray(data) ? data : []);
         } else {
-          setSets(normalizeSets(FALLBACK_SETS));
+          if (!cachedHasData) setSets(normalizeSets(FALLBACK_SETS));
         }
       } catch {
-        setSets(normalizeSets(FALLBACK_SETS));
+        if (!cachedHasData) setSets(normalizeSets(FALLBACK_SETS));
       } finally {
         setLoading(false);
       }
@@ -417,7 +455,7 @@ export default function HomeClient({
             <span className="text-gray-300">
               {CATEGORIES.find((c) => c.slug === category)?.label ?? "Other"}
             </span>{" "}
-            • Showing {filteredSortedList.length} item{filteredSortedList.length === 1 ? "" : "s"}
+            - Showing {filteredSortedList.length} item{filteredSortedList.length === 1 ? "" : "s"}
           </div>
         )}
       </header>
@@ -445,7 +483,7 @@ export default function HomeClient({
             {!loading && q.trim() && !isNumericQuery(q) && (
               <div className="mt-2 text-xs text-gray-500">
                 Showing {filteredSortedList.length} match
-                {filteredSortedList.length === 1 ? "" : "es"} for “{q.trim()}”
+                {filteredSortedList.length === 1 ? "" : "es"} for "{q.trim()}"
               </div>
             )}
           </div>
@@ -489,7 +527,7 @@ export default function HomeClient({
 
       <footer className="mt-16 text-sm text-gray-500 text-center">
         <p className="mb-2">As an Amazon Associate, we earn from qualifying purchases.</p>
-        <p>© {new Date().getFullYear()} SetPriceTracker</p>
+        <p>(c) {new Date().getFullYear()} SetPriceTracker</p>
       </footer>
     </main>
   );
@@ -518,12 +556,13 @@ function PriceCard({
   return (
     <Link href={`/set/${setId}`} className="w-full">
       <div className="border border-gray-800 rounded-md p-3 hover:border-gray-600 hover:bg-gray-900 transition cursor-pointer">
-        <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-black relative">
+        <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-gray-900 relative">
           <img
             src={imageUrl}
             alt={`LEGO item ${setId}`}
             className="w-full h-full object-cover"
-            loading="lazy"
+            loading="eager"
+            decoding="async"
           />
           {showDiscountBadge && (
             <div className="absolute top-2 left-2 text-xs font-semibold bg-green-400 text-black px-2 py-1 rounded-md">
@@ -571,16 +610,16 @@ function Pagination({
 
   const clampLocal = (p: number) => Math.min(pageCount, Math.max(1, p));
   const windowSize = 2;
-  const pages: (number | "…")[] = [];
+  const pages: (number | "...")[] = [];
 
-  const add = (v: number | "…") => pages.push(v);
+  const add = (v: number | "...") => pages.push(v);
   const start = Math.max(2, page - windowSize);
   const end = Math.min(pageCount - 1, page + windowSize);
 
   add(1);
-  if (start > 2) add("…");
+  if (start > 2) add("...");
   for (let p = start; p <= end; p++) add(p);
-  if (end < pageCount - 1) add("…");
+  if (end < pageCount - 1) add("...");
   add(pageCount);
 
   return (
@@ -594,9 +633,9 @@ function Pagination({
       </button>
 
       {pages.map((p, i) =>
-        p === "…" ? (
+        p === "..." ? (
           <span key={`e-${i}`} className="px-2 text-gray-500">
-            …
+            ...
           </span>
         ) : (
           <button

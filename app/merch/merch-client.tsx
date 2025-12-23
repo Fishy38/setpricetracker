@@ -24,6 +24,32 @@ type ApiRow = {
 };
 
 const PAGE_SIZE = 80;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+function readCache<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { t?: number; data?: T } | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    const ts = Number(parsed.t);
+    if (!Number.isFinite(ts)) return null;
+    if (Date.now() - ts > CACHE_TTL_MS) return null;
+    return parsed.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache<T>(key: string, data: T) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ t: Date.now(), data }));
+  } catch {
+    // ignore cache write errors
+  }
+}
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
@@ -113,13 +139,24 @@ export default function MerchClient() {
 
   useEffect(() => {
     (async () => {
+      const cacheKey = "sets-cache:MERCH";
+      const cached = readCache<ApiRow[]>(cacheKey);
+      const cachedHasData = Array.isArray(cached) && cached.length > 0;
+
+      if (cachedHasData) {
+        setItems(cached as ApiRow[]);
+        setLoading(false);
+      }
+
       try {
-        const res = await fetch("/api/sets?type=MERCH", { cache: "no-store" });
+        const res = await fetch("/api/sets?type=MERCH", { cache: "force-cache" });
         if (!res.ok) throw new Error("bad response");
         const data = (await res.json()) as ApiRow[];
-        setItems(Array.isArray(data) ? data : []);
+        const next = Array.isArray(data) ? data : [];
+        setItems(next);
+        if (next.length) writeCache(cacheKey, next);
       } catch {
-        setItems([]);
+        if (!cachedHasData) setItems([]);
       } finally {
         setLoading(false);
       }
@@ -173,13 +210,14 @@ export default function MerchClient() {
               return (
                 <Link key={it.setId} href={`/set/${it.setId}`} className="w-full">
                   <div className="border border-gray-800 rounded-md p-3 hover:border-gray-600 hover:bg-gray-900 transition cursor-pointer">
-                    <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-black">
+                    <div className="w-full aspect-square rounded-md overflow-hidden border border-gray-800 mb-3 bg-gray-900">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={it.imageUrl}
                         alt={it.name ?? it.setId}
                         className="w-full h-full object-cover"
-                        loading="lazy"
+                        loading="eager"
+                        decoding="async"
                       />
                     </div>
 

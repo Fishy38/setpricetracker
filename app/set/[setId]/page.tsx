@@ -97,7 +97,7 @@ export default async function SetPage({ params }: PageProps) {
       <main className="min-h-screen bg-black text-white flex flex-col items-center px-6 py-12">
         <h1 className="text-3xl font-bold mb-2">Set not found</h1>
         <Link href="/" className="underline text-gray-300 hover:text-white">
-          ← Back to home
+          {"<- Back to home"}
         </Link>
       </main>
     );
@@ -159,6 +159,8 @@ export default async function SetPage({ params }: PageProps) {
             src={(set as any).imageUrl}
             className="w-full aspect-square object-cover rounded-md border border-gray-800"
             alt={(set as any).name ?? `LEGO Set ${setId}`}
+            loading="eager"
+            decoding="async"
           />
           <div className="mt-4">
             <div className="text-xs uppercase text-gray-500">Set</div>

@@ -103,8 +103,8 @@ export default function CategoryMenu() {
             </button>
 
             {open && (
-              <div className="absolute left-1/2 top-full mt-0 w-[min(720px,85vw)] -translate-x-1/2 bg-black border border-gray-800 shadow-xl z-50">
-                <div className="px-6 py-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              <div className="absolute left-1/2 top-full mt-0 pt-3 w-[min(720px,85vw)] -translate-x-1/2 bg-black border border-gray-800 shadow-xl z-50">
+                <div className="px-6 pb-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
                   {THEMES.map((t) => (
                     <Link
                       key={t}
@@ -127,3 +127,4 @@ export default function CategoryMenu() {
     </header>
   );
 }
+
