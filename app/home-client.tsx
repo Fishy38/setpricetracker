@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SETS as FALLBACK_SETS } from "../lib/sets";
 import { warmImageCache } from "@/lib/image-prefetch";
-import { formatRetailerLabel } from "@/lib/retailer";
+import { formatRetailerLabel, retailerKey } from "@/lib/retailer";
 import { formatCentsUsd, parsePriceToCents as parseToCents } from "@/lib/utils";
 
 type ApiOffer = {
@@ -45,6 +45,7 @@ type UiSetRow = {
   bestOffer: UiOffer | null;
   discountCents: number | null;
   discountPct: number | null;
+  retailerLinks: string[];
 
   productType: string | null;
   setNumber: string | null;
@@ -52,10 +53,21 @@ type UiSetRow = {
 };
 
 type SortKey = "biggestDiscount" | "lowestPrice" | "highestPrice" | "setId";
+type RetailerFilterKey = "all" | "amazon" | "lego";
 
 const PAGE_SIZE = 80;
 const DEFAULT_SORT: SortKey = "biggestDiscount";
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const RETAILER_FILTERS: { key: RetailerFilterKey; label: string }[] = [
+  { key: "all", label: "All retailers" },
+  { key: "amazon", label: "Amazon" },
+  { key: "lego", label: "LEGO.com" },
+];
+const RETAILER_FILTER_KEYS: Record<RetailerFilterKey, string | null> = {
+  all: null,
+  amazon: "AMAZON",
+  lego: "LEGO",
+};
 
 function readCache<T>(key: string): T | null {
   if (typeof window === "undefined") return null;
@@ -128,6 +140,13 @@ const CATEGORIES: { slug: CategorySlug; label: string }[] = [
 function normalizeSets(input: any[]): UiSetRow[] {
   return (input ?? []).map((s) => {
     const msrpCents = parseToCents(s.msrp);
+    const retailerLinks = Array.from(
+      new Set(
+        (s.offers ?? [])
+          .filter((o: ApiOffer) => Boolean(o?.url))
+          .map((o: ApiOffer) => retailerKey(o?.retailer))
+      )
+    );
 
     const bo =
       s.bestOffer ??
@@ -150,6 +169,7 @@ function normalizeSets(input: any[]): UiSetRow[] {
       bestOffer,
       discountCents: typeof s.discountCents === "number" ? s.discountCents : null,
       discountPct: typeof s.discountPct === "number" ? s.discountPct : null,
+      retailerLinks,
       productType: s.productType != null ? String(s.productType) : null,
       setNumber: s.setNumber != null ? String(s.setNumber) : null,
       inferredType: s.inferredType != null ? String(s.inferredType) : null,
@@ -258,6 +278,12 @@ function coerceSort(v: string | null): SortKey {
   return DEFAULT_SORT;
 }
 
+function coerceRetailerFilter(v: string | null): RetailerFilterKey {
+  if (v === "amazon") return "amazon";
+  if (v === "lego") return "lego";
+  return "all";
+}
+
 function coercePage(v: string | null) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 1;
@@ -319,6 +345,7 @@ export default function HomeClient({
 
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_SORT);
+  const [retailerFilter, setRetailerFilter] = useState<RetailerFilterKey>("all");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [sets, setSets] = useState<UiSetRow[]>([]);
@@ -334,18 +361,21 @@ export default function HomeClient({
   useEffect(() => {
     const urlQ = sp.get("q") ?? "";
     const urlSort = coerceSort(sp.get("sort"));
+    const urlRetailer = coerceRetailerFilter(sp.get("retailer"));
     const urlPage = coercePage(sp.get("page"));
 
     if (!didInitFromUrl.current) {
       didInitFromUrl.current = true;
       setQ(urlQ);
       setSortKey(urlSort);
+      setRetailerFilter(urlRetailer);
       setPage(urlPage);
       return;
     }
 
     setQ((prev) => (prev !== urlQ ? urlQ : prev));
     setSortKey((prev) => (prev !== urlSort ? urlSort : prev));
+    setRetailerFilter((prev) => (prev !== urlRetailer ? urlRetailer : prev));
     setPage((prev) => (prev !== urlPage ? urlPage : prev));
   }, [sp]);
 
@@ -387,9 +417,14 @@ export default function HomeClient({
     const filteredByCategory =
       category === "all" ? sets ?? [] : (sets ?? []).filter((s) => categorizeSet(s) === category);
 
-    const filtered = filteredByCategory.filter((s) => matchesQuery(s, q));
+    const requiredRetailer = RETAILER_FILTER_KEYS[retailerFilter];
+    const filteredByRetailer = requiredRetailer
+      ? filteredByCategory.filter((s) => s.retailerLinks.includes(requiredRetailer))
+      : filteredByCategory;
+
+    const filtered = filteredByRetailer.filter((s) => matchesQuery(s, q));
     return sortSets(filtered, sortKey);
-  }, [sets, q, sortKey, category]);
+  }, [sets, q, sortKey, category, retailerFilter]);
 
   const pageCount = useMemo(() => {
     return Math.max(1, Math.ceil(filteredSortedList.length / PAGE_SIZE));
@@ -427,12 +462,13 @@ export default function HomeClient({
 
     if (tq) params.set("q", tq);
     if (sortKey !== DEFAULT_SORT) params.set("sort", sortKey);
+    if (retailerFilter !== "all") params.set("retailer", retailerFilter);
     if (page > 1) params.set("page", String(page));
 
     const qs = params.toString();
     const next = qs ? `${basePath}?${qs}` : basePath;
     router.replace(next);
-  }, [q, sortKey, page, router, basePath]);
+  }, [q, sortKey, retailerFilter, page, router, basePath]);
 
   function go() {
     const raw = q.trim();
@@ -444,6 +480,11 @@ export default function HomeClient({
 
   function onChangeSort(next: SortKey) {
     setSortKey(next);
+    setPage(1);
+  }
+
+  function onChangeRetailer(next: RetailerFilterKey) {
+    setRetailerFilter(next);
     setPage(1);
   }
 
@@ -503,18 +544,35 @@ export default function HomeClient({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs uppercase tracking-wide text-gray-500">Sort</span>
-            <select
-              value={sortKey}
-              onChange={(e) => onChangeSort(e.target.value as SortKey)}
-              className="rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400"
-            >
-              <option value="biggestDiscount">Biggest discount %</option>
-              <option value="lowestPrice">Lowest price</option>
-              <option value="highestPrice">Highest price</option>
-              <option value="setId">Set #</option>
-            </select>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-gray-500">Sort</span>
+              <select
+                value={sortKey}
+                onChange={(e) => onChangeSort(e.target.value as SortKey)}
+                className="rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400"
+              >
+                <option value="biggestDiscount">Biggest discount %</option>
+                <option value="lowestPrice">Lowest price</option>
+                <option value="highestPrice">Highest price</option>
+                <option value="setId">Set #</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-gray-500">Retailer</span>
+              <select
+                value={retailerFilter}
+                onChange={(e) => onChangeRetailer(e.target.value as RetailerFilterKey)}
+                className="rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400"
+              >
+                {RETAILER_FILTERS.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </section>

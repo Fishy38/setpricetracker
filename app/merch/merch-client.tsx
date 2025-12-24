@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { warmImageCache } from "@/lib/image-prefetch";
-import { formatRetailerLabel } from "@/lib/retailer";
+import { formatRetailerLabel, retailerKey } from "@/lib/retailer";
 import { formatCentsUsd } from "@/lib/utils";
 
 type ApiOffer = {
@@ -24,8 +24,21 @@ type ApiRow = {
   inferredType?: string | null;
 };
 
+type UiRow = ApiRow & { retailerLinks: string[] };
+
 const PAGE_SIZE = 80;
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const RETAILER_FILTERS = [
+  { key: "all", label: "All retailers" },
+  { key: "amazon", label: "Amazon" },
+  { key: "lego", label: "LEGO.com" },
+] as const;
+type RetailerFilterKey = (typeof RETAILER_FILTERS)[number]["key"];
+const RETAILER_FILTER_KEYS: Record<RetailerFilterKey, string | null> = {
+  all: null,
+  amazon: "AMAZON",
+  lego: "LEGO",
+};
 
 function readCache<T>(key: string): T | null {
   if (typeof window === "undefined") return null;
@@ -54,6 +67,20 @@ function writeCache<T>(key: string, data: T) {
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n));
+}
+
+function normalizeMerch(input: ApiRow[]): UiRow[] {
+  return (input ?? []).map((item) => {
+    const retailerLinks = Array.from(
+      new Set(
+        (item.offers ?? [])
+          .filter((o) => Boolean(o?.url))
+          .map((o) => retailerKey(o?.retailer))
+      )
+    );
+
+    return { ...item, retailerLinks };
+  });
 }
 
 function SkeletonCard() {
@@ -134,9 +161,10 @@ function Pagination({
 }
 
 export default function MerchClient() {
-  const [items, setItems] = useState<ApiRow[]>([]);
+  const [items, setItems] = useState<UiRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [retailerFilter, setRetailerFilter] = useState<RetailerFilterKey>("all");
 
   useEffect(() => {
     (async () => {
@@ -145,7 +173,7 @@ export default function MerchClient() {
       const cachedHasData = Array.isArray(cached) && cached.length > 0;
 
       if (cachedHasData) {
-        setItems(cached as ApiRow[]);
+        setItems(normalizeMerch(cached as ApiRow[]));
         setLoading(false);
       }
 
@@ -154,7 +182,7 @@ export default function MerchClient() {
         if (!res.ok) throw new Error("bad response");
         const data = (await res.json()) as ApiRow[];
         const next = Array.isArray(data) ? data : [];
-        setItems(next);
+        setItems(normalizeMerch(next));
         if (next.length) writeCache(cacheKey, next);
       } catch {
         if (!cachedHasData) setItems([]);
@@ -164,9 +192,15 @@ export default function MerchClient() {
     })();
   }, []);
 
+  const filteredItems = useMemo(() => {
+    const requiredRetailer = RETAILER_FILTER_KEYS[retailerFilter];
+    if (!requiredRetailer) return items ?? [];
+    return (items ?? []).filter((item) => item.retailerLinks.includes(requiredRetailer));
+  }, [items, retailerFilter]);
+
   const pageCount = useMemo(() => {
-    return Math.max(1, Math.ceil((items?.length ?? 0) / PAGE_SIZE));
-  }, [items]);
+    return Math.max(1, Math.ceil((filteredItems?.length ?? 0) / PAGE_SIZE));
+  }, [filteredItems]);
 
   useEffect(() => {
     setPage((p) => clamp(p, 1, pageCount));
@@ -175,16 +209,16 @@ export default function MerchClient() {
   const pageList = useMemo(() => {
     const p = clamp(page, 1, pageCount);
     const start = (p - 1) * PAGE_SIZE;
-    return (items ?? []).slice(start, start + PAGE_SIZE);
-  }, [items, page, pageCount]);
+    return (filteredItems ?? []).slice(start, start + PAGE_SIZE);
+  }, [filteredItems, page, pageCount]);
 
   const nextPageList = useMemo(() => {
     if (pageCount <= 1) return [];
     const nextPage = clamp(page + 1, 1, pageCount);
     if (nextPage === page) return [];
     const start = (nextPage - 1) * PAGE_SIZE;
-    return (items ?? []).slice(start, start + PAGE_SIZE);
-  }, [items, page, pageCount]);
+    return (filteredItems ?? []).slice(start, start + PAGE_SIZE);
+  }, [filteredItems, page, pageCount]);
 
   useEffect(() => {
     if (loading) return;
@@ -213,10 +247,28 @@ export default function MerchClient() {
             <SkeletonCard key={i} />
           ))}
         </section>
-      ) : items.length === 0 ? (
+      ) : filteredItems.length === 0 ? (
         <div className="text-gray-400">No merch found yet.</div>
       ) : (
         <>
+          <section className="w-full max-w-6xl mb-6 flex items-center justify-center gap-2">
+            <span className="text-xs uppercase tracking-wide text-gray-500">Retailer</span>
+            <select
+              value={retailerFilter}
+              onChange={(e) => {
+                setRetailerFilter(e.target.value as RetailerFilterKey);
+                setPage(1);
+              }}
+              className="rounded-md px-3 py-2 bg-gray-900 text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-green-400"
+            >
+              {RETAILER_FILTERS.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </section>
+
           <section className="w-full max-w-6xl grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
             {pageList.map((it) => {
               const best = it.bestOffer ?? null;

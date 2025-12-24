@@ -118,3 +118,24 @@ export async function scrapeLegoPriceCents(productUrl: string) {
 
   return null;
 }
+
+// 3) Resolve a setId by searching LEGO with a product name
+export async function findLegoSetIdByName(name: string) {
+  const query = String(name ?? "").trim();
+  if (query.length < 4) return null;
+
+  const searchUrl = `https://www.lego.com/en-us/search?q=${encodeURIComponent(query)}`;
+
+  const res = await fetchWithRetry(searchUrl, {
+    headers: {
+      "user-agent": UA,
+      "accept-language": "en-US,en;q=0.9",
+    },
+    cache: "no-store",
+  });
+
+  const html = await res.text();
+  const re = /\/en-us\/product\/[^"']*-(\d{4,6})\b/i;
+  const m = html.match(re);
+  return m?.[1] ?? null;
+}

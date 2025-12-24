@@ -6,10 +6,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { parsePriceToCents } from "@/lib/utils";
 import { getAmazonSitestripeUrl } from "@/lib/amazon-sitestripe";
+import { findLegoSetIdByName } from "@/lib/lego";
 
 const AMAZON_RETAILER = "Amazon";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
+const PLACEHOLDER_IMAGE = "/placeholder-set.svg";
 
 type RefreshInput = { setId: string; amazonUrl: string };
 
@@ -50,6 +52,108 @@ function normalizeAmazonUrl(raw: string | null | undefined): { url: string | nul
 
 function stripHtml(input: string) {
   return input.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function cleanAmazonTitle(input: string) {
+  return stripHtml(input).replace(/\s*-?\s*Amazon\.com.*$/i, "").trim();
+}
+
+function isLikelySetId(value: string) {
+  const v = String(value ?? "").trim();
+  if (!/^\d{4,6}$/.test(v)) return false;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return false;
+  if (v.length === 4 && n >= 1900 && n <= 2099) return false;
+  return true;
+}
+
+function pickLikelySetId(matches: string[]) {
+  const unique = Array.from(new Set(matches ?? [])).filter(isLikelySetId);
+  const five = unique.filter((m) => m.length === 5);
+  if (five.length) return five[five.length - 1];
+  const four = unique.filter((m) => m.length === 4);
+  if (four.length) return four[four.length - 1];
+  const six = unique.filter((m) => m.length === 6);
+  if (six.length) return six[six.length - 1];
+  return null;
+}
+
+function extractSetIdFromText(text: string | null | undefined) {
+  const input = String(text ?? "");
+  if (!input) return null;
+  const matches = input.match(/\b\d{4,6}\b/g) ?? [];
+  return pickLikelySetId(matches);
+}
+
+function extractProductTitle(html: string) {
+  const m = html.match(/id=["']productTitle["'][^>]*>([\s\S]*?)<\/span>/i);
+  if (m?.[1]) return cleanAmazonTitle(m[1]);
+  const m2 = html.match(/<title>([\s\S]*?)<\/title>/i);
+  if (m2?.[1]) return cleanAmazonTitle(m2[1]);
+  return null;
+}
+
+function extractNamesFromLd(ld: any[]): string[] {
+  const nodes = flattenLd(ld);
+  const out: string[] = [];
+  for (const node of nodes) {
+    const name = node?.name;
+    if (typeof name === "string" && name.trim()) out.push(name.trim());
+  }
+  return out;
+}
+
+function extractSetIdentityFromAmazonHtml(html: string) {
+  const title = extractProductTitle(html);
+  const fromTitle = extractSetIdFromText(title);
+  if (fromTitle) return { setId: fromTitle, name: title };
+
+  const ld = extractJsonLd(html);
+  const names = extractNamesFromLd(ld);
+  for (const name of names) {
+    const hit = extractSetIdFromText(name);
+    if (hit) return { setId: hit, name: cleanAmazonTitle(name) };
+  }
+
+  const modelMatch =
+    html.match(/item model number[^0-9]*([0-9]{4,6})/i) ??
+    html.match(/model number[^0-9]*([0-9]{4,6})/i);
+  if (modelMatch?.[1] && isLikelySetId(modelMatch[1])) {
+    return { setId: modelMatch[1], name: title ?? null };
+  }
+
+  return { setId: null, name: title ?? names[0] ?? null };
+}
+
+async function resolveSetIdentityFromAmazonHtml(html: string) {
+  const extracted = extractSetIdentityFromAmazonHtml(html);
+  if (extracted.setId) return extracted;
+
+  const name = extracted.name;
+  if (name && name.toLowerCase().includes("lego")) {
+    const lookup = await findLegoSetIdByName(name);
+    if (lookup && isLikelySetId(lookup)) {
+      return { setId: lookup, name };
+    }
+  }
+
+  return extracted;
+}
+
+async function ensureSetExists(setId: string, name: string | null) {
+  const existing = await prisma.set.findUnique({
+    where: { setId },
+    select: { setId: true },
+  });
+  if (existing) return;
+
+  await prisma.set.create({
+    data: {
+      setId,
+      name: name ?? `LEGO Set ${setId}`,
+      imageUrl: PLACEHOLDER_IMAGE,
+    },
+  });
 }
 
 function extractJsonLd(html: string): any[] {
@@ -312,14 +416,35 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
   }
 
   const { priceCents, inStock } = parseAmazonLikeHtml(html);
+  const identity = await resolveSetIdentityFromAmazonHtml(html);
+  const currentIsNumeric = isLikelySetId(setId);
+  const remapTo =
+    !currentIsNumeric && identity.setId && identity.setId !== setId ? identity.setId : null;
+
+  let effectiveSetId = setId;
+  if (remapTo) {
+    await ensureSetExists(remapTo, identity.name ?? null);
+    await prisma.offer
+      .delete({
+        where: { setIdRef_retailer: { setIdRef: setId, retailer: AMAZON_RETAILER } },
+      })
+      .catch(() => null);
+    await prisma.priceHistory.updateMany({
+      where: { setIdRef: setId, retailer: AMAZON_RETAILER },
+      data: { setIdRef: remapTo },
+    });
+    effectiveSetId = remapTo;
+    console.log(`[AMAZON_REFRESH] remap setId=${setId} -> ${remapTo}`);
+  }
+
   console.log(
-    `[AMAZON_REFRESH] parsed setId=${setId} priceCents=${priceCents ?? "null"} inStock=${
+    `[AMAZON_REFRESH] parsed setId=${effectiveSetId} priceCents=${priceCents ?? "null"} inStock=${
       inStock ?? "null"
     }`
   );
 
   await prisma.offer.upsert({
-    where: { setIdRef_retailer: { setIdRef: setId, retailer: AMAZON_RETAILER } },
+    where: { setIdRef_retailer: { setIdRef: effectiveSetId, retailer: AMAZON_RETAILER } },
     update: {
       price: priceCents,
       inStock,
@@ -327,7 +452,7 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
       url: fetchUrl,
     },
     create: {
-      setIdRef: setId,
+      setIdRef: effectiveSetId,
       retailer: AMAZON_RETAILER,
       url: fetchUrl,
       price: priceCents,
@@ -336,7 +461,7 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
   });
 
   const last = await prisma.priceHistory.findFirst({
-    where: { setIdRef: setId, retailer: AMAZON_RETAILER },
+    where: { setIdRef: effectiveSetId, retailer: AMAZON_RETAILER },
     orderBy: { recordedAt: "desc" },
   });
 
@@ -345,7 +470,7 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
   if (changed) {
     await prisma.priceHistory.create({
       data: {
-        setIdRef: setId,
+        setIdRef: effectiveSetId,
         retailer: AMAZON_RETAILER,
         price: priceCents,
         inStock,
@@ -353,8 +478,8 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
     });
   }
 
-  console.log(`[AMAZON_REFRESH] done setId=${setId}`);
-  return { setId, ok: true, amazonUrl: fetchUrl, priceCents, inStock };
+  console.log(`[AMAZON_REFRESH] done setId=${effectiveSetId}`);
+  return { setId: effectiveSetId, ok: true, amazonUrl: fetchUrl, priceCents, inStock };
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
