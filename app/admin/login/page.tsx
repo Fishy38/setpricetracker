@@ -15,7 +15,7 @@ type PageProps = {
 
 export default async function AdminLoginPage({ searchParams }: PageProps) {
   const resolvedParams = await searchParams;
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get(getAdminSessionCookieName())?.value;
   const session = await verifyAdminSessionToken(token);
 

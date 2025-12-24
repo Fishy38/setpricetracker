@@ -239,7 +239,7 @@ async function buildEpcWindow(days: number): Promise<{
 }
 
 export default async function AdminDashboardPage() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get(getAdminSessionCookieName())?.value;
   const session = await verifyAdminSessionToken(token);
   if (!session.ok) {
