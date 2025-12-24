@@ -139,12 +139,13 @@ const CATEGORIES: { slug: CategorySlug; label: string }[] = [
 
 function normalizeSets(input: any[]): UiSetRow[] {
   return (input ?? []).map((s) => {
+    const offers = Array.isArray(s.offers) ? (s.offers as ApiOffer[]) : [];
     const msrpCents = parseToCents(s.msrp);
     const retailerLinks = Array.from(
-      new Set(
-        (s.offers ?? [])
-          .filter((o: ApiOffer) => Boolean(o?.url))
-          .map((o: ApiOffer) => retailerKey(o?.retailer))
+      new Set<string>(
+        offers
+          .filter((o) => Boolean(o?.url))
+          .map((o) => retailerKey(o?.retailer))
           .filter((key): key is string => typeof key === "string" && key.length > 0)
       )
     );

@@ -71,9 +71,10 @@ function clamp(n: number, min: number, max: number) {
 
 function normalizeMerch(input: ApiRow[]): UiRow[] {
   return (input ?? []).map((item) => {
+    const offers = Array.isArray(item.offers) ? (item.offers as ApiOffer[]) : [];
     const retailerLinks = Array.from(
-      new Set(
-        (item.offers ?? [])
+      new Set<string>(
+        offers
           .filter((o) => Boolean(o?.url))
           .map((o) => retailerKey(o?.retailer))
           .filter((key): key is string => typeof key === "string" && key.length > 0)
