@@ -145,6 +145,7 @@ function normalizeSets(input: any[]): UiSetRow[] {
         (s.offers ?? [])
           .filter((o: ApiOffer) => Boolean(o?.url))
           .map((o: ApiOffer) => retailerKey(o?.retailer))
+          .filter((key): key is string => typeof key === "string" && key.length > 0)
       )
     );
 

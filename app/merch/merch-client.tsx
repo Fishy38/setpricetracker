@@ -76,6 +76,7 @@ function normalizeMerch(input: ApiRow[]): UiRow[] {
         (item.offers ?? [])
           .filter((o) => Boolean(o?.url))
           .map((o) => retailerKey(o?.retailer))
+          .filter((key): key is string => typeof key === "string" && key.length > 0)
       )
     );
 
