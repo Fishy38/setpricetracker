@@ -273,7 +273,7 @@ export default async function AdminDashboardPage() {
             </button>
           </form>
 
-          <form action="/api/admin/rakuten-refresh" method="GET">
+          <form action="/api/admin/rakuten-refresh" method="GET" target="_blank">
             <button
               type="submit"
               className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
@@ -282,7 +282,7 @@ export default async function AdminDashboardPage() {
             </button>
           </form>
 
-          <form action="/api/admin/giftcard-refresh" method="POST">
+          <form action="/api/admin/giftcard-refresh" method="POST" target="_blank">
             <button
               type="submit"
               className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition"
@@ -290,7 +290,7 @@ export default async function AdminDashboardPage() {
               🎁 Refresh Gift Cards
             </button>
           </form>
-          <form action="/api/refresh/lego" method="GET">
+          <form action="/api/refresh/lego" method="GET" target="_blank">
             <input type="hidden" name="all" value="1" />
             <button
               type="submit"
@@ -300,7 +300,7 @@ export default async function AdminDashboardPage() {
             </button>
           </form>
 
-          <form action="/api/refresh/amazon" method="GET">
+          <form action="/api/refresh/amazon" method="GET" target="_blank">
             <input type="hidden" name="all" value="1" />
             <button
               type="submit"
@@ -325,7 +325,12 @@ export default async function AdminDashboardPage() {
           <div className="border border-zinc-700 rounded p-4 bg-zinc-950 space-y-4">
             <div className="text-xs uppercase tracking-wide text-zinc-500">Refresh</div>
 
-            <form action="/api/refresh/lego" method="GET" className="flex flex-col sm:flex-row gap-2">
+            <form
+              action="/api/refresh/lego"
+              method="GET"
+              target="_blank"
+              className="flex flex-col sm:flex-row gap-2"
+            >
               <input
                 name="setId"
                 placeholder="Set ID (e.g. 75394)"
@@ -339,7 +344,12 @@ export default async function AdminDashboardPage() {
               </button>
             </form>
 
-            <form action="/api/refresh/lego" method="GET" className="flex flex-col sm:flex-row gap-2">
+            <form
+              action="/api/refresh/lego"
+              method="GET"
+              target="_blank"
+              className="flex flex-col sm:flex-row gap-2"
+            >
               <input type="hidden" name="all" value="1" />
               <input
                 name="limit"
@@ -359,7 +369,12 @@ export default async function AdminDashboardPage() {
               </button>
             </form>
 
-            <form action="/api/refresh/amazon" method="GET" className="flex flex-col sm:flex-row gap-2">
+            <form
+              action="/api/refresh/amazon"
+              method="GET"
+              target="_blank"
+              className="flex flex-col sm:flex-row gap-2"
+            >
               <input
                 name="setId"
                 placeholder="Amazon Set ID (e.g. 75394)"
@@ -373,7 +388,12 @@ export default async function AdminDashboardPage() {
               </button>
             </form>
 
-            <form action="/api/refresh/amazon" method="GET" className="flex flex-col sm:flex-row gap-2">
+            <form
+              action="/api/refresh/amazon"
+              method="GET"
+              target="_blank"
+              className="flex flex-col sm:flex-row gap-2"
+            >
               <input type="hidden" name="all" value="1" />
               <input
                 name="limit"
@@ -393,7 +413,12 @@ export default async function AdminDashboardPage() {
               </button>
             </form>
 
-            <form action="/api/admin/giftcard-refresh" method="GET" className="flex flex-col gap-2">
+            <form
+              action="/api/admin/giftcard-refresh"
+              method="GET"
+              target="_blank"
+              className="flex flex-col gap-2"
+            >
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   name="keyword"

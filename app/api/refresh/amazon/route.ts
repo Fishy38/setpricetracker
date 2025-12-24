@@ -103,6 +103,65 @@ function extractNamesFromLd(ld: any[]): string[] {
   return out;
 }
 
+function extractImageFromLd(ld: any[]): string | null {
+  const nodes = flattenLd(ld);
+  for (const node of nodes) {
+    const image = node?.image;
+    if (typeof image === "string" && image.trim()) return image.trim();
+    if (Array.isArray(image) && image.length) {
+      const first = String(image[0] ?? "").trim();
+      if (first) return first;
+    }
+    if (image && typeof image === "object") {
+      const url = String(image.url ?? "").trim();
+      if (url) return url;
+    }
+  }
+  return null;
+}
+
+function extractMetaImage(html: string, prop: string) {
+  const re = new RegExp(`property=[\"']${prop}[\"'][^>]*content=[\"']([^\"']+)[\"']`, "i");
+  const m = html.match(re);
+  return m?.[1] ?? null;
+}
+
+function parseDynamicImageAttribute(raw: string) {
+  const cleaned = raw.replace(/&quot;/g, "\"");
+  try {
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const first = Object.keys(parsed ?? {})[0];
+    return first ? String(first) : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractAmazonImageUrl(html: string) {
+  const ld = extractJsonLd(html);
+  const fromLd = extractImageFromLd(ld);
+  if (fromLd) return fromLd;
+
+  const og = extractMetaImage(html, "og:image");
+  if (og) return og;
+
+  const twitter = html.match(/name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i);
+  if (twitter?.[1]) return twitter[1];
+
+  const landing =
+    html.match(/id=["']landingImage["'][^>]*data-old-hires=["']([^"']+)["']/i) ??
+    html.match(/id=["']landingImage["'][^>]*src=["']([^"']+)["']/i);
+  if (landing?.[1]) return landing[1];
+
+  const dynamic = html.match(/data-a-dynamic-image=["']([^"']+)["']/i);
+  if (dynamic?.[1]) {
+    const parsed = parseDynamicImageAttribute(dynamic[1]);
+    if (parsed) return parsed;
+  }
+
+  return null;
+}
+
 function extractSetIdentityFromAmazonHtml(html: string) {
   const title = extractProductTitle(html);
   const fromTitle = extractSetIdFromText(title);
@@ -156,6 +215,25 @@ async function ensureSetExists(setId: string, name: string | null) {
   });
 }
 
+async function updateSetImageIfPlaceholder(setId: string, imageUrl: string | null) {
+  const next = String(imageUrl ?? "").trim();
+  if (!next) return;
+
+  const existing = await prisma.set.findUnique({
+    where: { setId },
+    select: { imageUrl: true },
+  });
+  if (!existing) return;
+
+  const current = String(existing.imageUrl ?? "").trim();
+  if (!current || current === PLACEHOLDER_IMAGE) {
+    await prisma.set.update({
+      where: { setId },
+      data: { imageUrl: next },
+    });
+  }
+}
+
 function extractJsonLd(html: string): any[] {
   const out: any[] = [];
   const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -192,6 +270,14 @@ function flattenLd(nodes: any[]): any[] {
   return out;
 }
 
+function isUnitPriceSpec(spec: any) {
+  if (!spec || typeof spec !== "object") return false;
+  const type = String(spec["@type"] ?? spec.priceType ?? "").toLowerCase();
+  if (type.includes("unitprice")) return true;
+  if (spec.unitCode || spec.unitText || spec.referenceQuantity || spec.unitQuantity) return true;
+  return false;
+}
+
 function findOfferPrice(ld: any[]): { price: unknown; availability?: unknown } | null {
   const nodes = flattenLd(ld);
 
@@ -201,7 +287,7 @@ function findOfferPrice(ld: any[]): { price: unknown; availability?: unknown } |
     const pick = (o: any) => {
       if (!o) return null;
       if (o?.price != null) return { price: o.price, availability: o.availability };
-      if (o?.priceSpecification?.price != null) {
+      if (o?.priceSpecification?.price != null && !isUnitPriceSpec(o.priceSpecification)) {
         return { price: o.priceSpecification.price, availability: o.availability };
       }
       return null;
@@ -218,7 +304,7 @@ function findOfferPrice(ld: any[]): { price: unknown; availability?: unknown } |
     }
 
     if (node?.price != null) return { price: node.price, availability: node.availability };
-    if (node?.priceSpecification?.price != null) {
+    if (node?.priceSpecification?.price != null && !isUnitPriceSpec(node.priceSpecification)) {
       return { price: node.priceSpecification.price, availability: node.availability };
     }
   }
@@ -239,7 +325,9 @@ function collectOfferPrices(ld: any[]): unknown[] {
     const take = (o: any) => {
       if (!o) return;
       pushPrice(o?.price);
-      pushPrice(o?.priceSpecification?.price);
+      if (o?.priceSpecification?.price != null && !isUnitPriceSpec(o.priceSpecification)) {
+        pushPrice(o.priceSpecification.price);
+      }
     };
 
     if (Array.isArray(offers)) {
@@ -249,7 +337,9 @@ function collectOfferPrices(ld: any[]): unknown[] {
     }
 
     pushPrice(node?.price);
-    pushPrice(node?.priceSpecification?.price);
+    if (node?.priceSpecification?.price != null && !isUnitPriceSpec(node.priceSpecification)) {
+      pushPrice(node.priceSpecification.price);
+    }
   }
 
   return out;
@@ -286,6 +376,27 @@ function extractAvailabilityFromHtml(html: string): boolean | null {
   return null;
 }
 
+function isUnitPriceContext(html: string, idx: number) {
+  const windowStart = Math.max(0, idx - 40);
+  const windowEnd = Math.min(html.length, idx + 60);
+  const context = html.slice(windowStart, windowEnd).toLowerCase();
+  return (
+    context.includes("priceperunit") ||
+    context.includes("price-per-unit") ||
+    context.includes("unitprice") ||
+    context.includes("unit-price") ||
+    context.includes("per ounce") ||
+    context.includes("per oz") ||
+    context.includes("per lb") ||
+    context.includes("per count") ||
+    context.includes("per item") ||
+    context.includes("per unit") ||
+    context.includes("/oz") ||
+    context.includes("/ounce") ||
+    context.includes("/lb")
+  );
+}
+
 function extractPriceCandidatesFromHtml(html: string): { strong: string[]; weak: string[] } {
   const strong: string[] = [];
   const weak: string[] = [];
@@ -304,7 +415,9 @@ function extractPriceCandidatesFromHtml(html: string): { strong: string[]; weak:
 
   for (const re of strongPatterns) {
     for (const m of html.matchAll(re)) {
-      if (m?.[1]) strong.push(m[1]);
+      if (!m?.[1]) continue;
+      if (isUnitPriceContext(html, m.index ?? 0)) continue;
+      strong.push(m[1]);
     }
   }
 
@@ -317,6 +430,7 @@ function extractPriceCandidatesFromHtml(html: string): { strong: string[]; weak:
 
   for (const m of html.matchAll(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/g)) {
     if (!m?.[1]) continue;
+    if (isUnitPriceContext(html, m.index ?? 0)) continue;
     const idx = m.index ?? 0;
     const windowStart = Math.max(0, idx - 32);
     const windowEnd = Math.min(html.length, idx + 32);
@@ -341,12 +455,13 @@ function extractPriceCandidatesFromHtml(html: string): { strong: string[]; weak:
 function parseAmazonLikeHtml(html: string): { priceCents: number | null; inStock: boolean | null } {
   const ld = extractJsonLd(html);
   const found = findOfferPrice(ld);
-  const ldCandidates = collectOfferPrices(ld);
-  const htmlCandidates = extractPriceCandidatesFromHtml(html);
-  const htmlPool = htmlCandidates.strong.length ? htmlCandidates.strong : htmlCandidates.weak;
-  const priceCents = pickLowestPriceCents(
-    ldCandidates.length ? ldCandidates : htmlPool
-  ) ?? parsePriceToCents(found?.price);
+  let priceCents = parsePriceToCents(found?.price);
+  if (priceCents == null) {
+    const ldCandidates = collectOfferPrices(ld);
+    const htmlCandidates = extractPriceCandidatesFromHtml(html);
+    const htmlPool = htmlCandidates.strong.length ? htmlCandidates.strong : htmlCandidates.weak;
+    priceCents = pickLowestPriceCents(ldCandidates.length ? ldCandidates : htmlPool);
+  }
 
   const availability = availabilityToInStock(found?.availability);
   const htmlAvailability = extractAvailabilityFromHtml(html);
@@ -417,6 +532,7 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
 
   const { priceCents, inStock } = parseAmazonLikeHtml(html);
   const identity = await resolveSetIdentityFromAmazonHtml(html);
+  const imageUrl = extractAmazonImageUrl(html);
   const currentIsNumeric = isLikelySetId(setId);
   const remapTo =
     !currentIsNumeric && identity.setId && identity.setId !== setId ? identity.setId : null;
@@ -436,6 +552,8 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
     effectiveSetId = remapTo;
     console.log(`[AMAZON_REFRESH] remap setId=${setId} -> ${remapTo}`);
   }
+
+  await updateSetImageIfPlaceholder(effectiveSetId, imageUrl);
 
   console.log(
     `[AMAZON_REFRESH] parsed setId=${effectiveSetId} priceCents=${priceCents ?? "null"} inStock=${
