@@ -2,6 +2,9 @@
 import { prisma } from "@/lib/prisma";
 import { formatRetailerLabel } from "@/lib/retailer";
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { getAdminSessionCookieName, verifyAdminSessionToken } from "@/lib/admin-session";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -236,6 +239,13 @@ async function buildEpcWindow(days: number): Promise<{
 }
 
 export default async function AdminDashboardPage() {
+  const cookieStore = cookies();
+  const token = cookieStore.get(getAdminSessionCookieName())?.value;
+  const session = await verifyAdminSessionToken(token);
+  if (!session.ok) {
+    redirect("/admin/login");
+  }
+
   const [clicks, epc7, epc30] = await Promise.all([
     getTopClickedSets(),
     buildEpcWindow(7),
@@ -254,6 +264,15 @@ export default async function AdminDashboardPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          <form action="/api/admin/logout" method="POST">
+            <button
+              type="submit"
+              className="bg-zinc-800 text-white px-4 py-2 rounded hover:bg-zinc-700 transition"
+            >
+              Sign Out
+            </button>
+          </form>
+
           <form action="/api/admin/rakuten-refresh" method="GET">
             <button
               type="submit"

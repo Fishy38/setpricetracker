@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { warmImageCache } from "@/lib/image-prefetch";
 import { formatRetailerLabel } from "@/lib/retailer";
 import { formatCentsUsd } from "@/lib/utils";
 
@@ -177,6 +178,20 @@ export default function MerchClient() {
     return (items ?? []).slice(start, start + PAGE_SIZE);
   }, [items, page, pageCount]);
 
+  const nextPageList = useMemo(() => {
+    if (pageCount <= 1) return [];
+    const nextPage = clamp(page + 1, 1, pageCount);
+    if (nextPage === page) return [];
+    const start = (nextPage - 1) * PAGE_SIZE;
+    return (items ?? []).slice(start, start + PAGE_SIZE);
+  }, [items, page, pageCount]);
+
+  useEffect(() => {
+    if (loading) return;
+    const urls = [...pageList, ...nextPageList].map((item) => item.imageUrl);
+    warmImageCache(urls, { max: PAGE_SIZE, timeoutMs: 1200 });
+  }, [loading, pageList, nextPageList]);
+
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center px-6 py-12">
       <header className="mb-8 text-center">
@@ -216,7 +231,7 @@ export default function MerchClient() {
                         src={it.imageUrl}
                         alt={it.name ?? it.setId}
                         className="w-full h-full object-cover"
-                        loading="eager"
+                        loading="lazy"
                         decoding="async"
                       />
                     </div>

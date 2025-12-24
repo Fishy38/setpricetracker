@@ -109,11 +109,14 @@ export async function GET() {
   const base = getBaseUrl();
   const started = Date.now();
 
-  // If you want: run LEGO refresh for *all* sets daily.
+  // If you want: run LEGO + Amazon refresh for *all* sets daily.
   // This is usually what you mean by "update commands once every 24 hours".
   const jobs = [
     // LEGO full refresh (use lego refresh with all=1)
     { name: "legoAll", path: "/api/refresh/lego?all=1&limit=2", method: "POST" as const, timeoutMs: 300_000 },
+
+    // Amazon full refresh (use amazon refresh with all=1)
+    { name: "amazonAll", path: "/api/refresh/amazon?all=1&limit=2", method: "POST" as const, timeoutMs: 300_000 },
 
     // Giftcards refresh (purge=1 keeps DB clean; remove if you dislike)
     { name: "giftcards", path: "/api/refresh/giftcards?purge=1", method: "POST" as const, timeoutMs: 180_000 },

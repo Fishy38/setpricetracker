@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SETS as FALLBACK_SETS } from "../lib/sets";
+import { warmImageCache } from "@/lib/image-prefetch";
 import { formatRetailerLabel } from "@/lib/retailer";
 import { formatCentsUsd, parsePriceToCents as parseToCents } from "@/lib/utils";
 
@@ -404,6 +405,20 @@ export default function HomeClient({
     return filteredSortedList.slice(start, start + PAGE_SIZE);
   }, [filteredSortedList, page, pageCount]);
 
+  const nextPageList = useMemo(() => {
+    if (pageCount <= 1) return [];
+    const nextPage = clamp(page + 1, 1, pageCount);
+    if (nextPage === page) return [];
+    const start = (nextPage - 1) * PAGE_SIZE;
+    return filteredSortedList.slice(start, start + PAGE_SIZE);
+  }, [filteredSortedList, page, pageCount]);
+
+  useEffect(() => {
+    if (loading) return;
+    const urls = [...pageList, ...nextPageList].map((set) => set.imageUrl);
+    warmImageCache(urls, { max: PAGE_SIZE, timeoutMs: 1200 });
+  }, [loading, pageList, nextPageList]);
+
   useEffect(() => {
     if (!didInitFromUrl.current) return;
 
@@ -561,7 +576,7 @@ function PriceCard({
             src={imageUrl}
             alt={`LEGO item ${setId}`}
             className="w-full h-full object-cover"
-            loading="eager"
+            loading="lazy"
             decoding="async"
           />
           {showDiscountBadge && (
