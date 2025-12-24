@@ -24,6 +24,12 @@ type RefreshResult = {
   error?: string;
 };
 
+type PriceCandidate = {
+  cents: number;
+  score: number;
+  source: string;
+};
+
 export type RefreshAllResult = {
   ok: boolean;
   total: number;
@@ -234,6 +240,14 @@ async function updateSetImageIfPlaceholder(setId: string, imageUrl: string | nul
   }
 }
 
+async function getSetMsrpCents(setId: string) {
+  const row = await prisma.set.findUnique({
+    where: { setId },
+    select: { msrp: true },
+  });
+  return typeof row?.msrp === "number" ? row.msrp : null;
+}
+
 function extractJsonLd(html: string): any[] {
   const out: any[] = [];
   const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -278,83 +292,129 @@ function isUnitPriceSpec(spec: any) {
   return false;
 }
 
-function findOfferPrice(ld: any[]): { price: unknown; availability?: unknown } | null {
-  const nodes = flattenLd(ld);
-
-  for (const node of nodes) {
-    const offers = node?.offers;
-
-    const pick = (o: any) => {
-      if (!o) return null;
-      if (o?.price != null) return { price: o.price, availability: o.availability };
-      if (o?.priceSpecification?.price != null && !isUnitPriceSpec(o.priceSpecification)) {
-        return { price: o.priceSpecification.price, availability: o.availability };
-      }
-      return null;
-    };
-
-    if (Array.isArray(offers)) {
-      for (const o of offers) {
-        const hit = pick(o);
-        if (hit) return hit;
-      }
-    } else if (offers) {
-      const hit = pick(offers);
-      if (hit) return hit;
-    }
-
-    if (node?.price != null) return { price: node.price, availability: node.availability };
-    if (node?.priceSpecification?.price != null && !isUnitPriceSpec(node.priceSpecification)) {
-      return { price: node.priceSpecification.price, availability: node.availability };
-    }
-  }
-
-  return null;
+function addPriceCandidate(
+  list: PriceCandidate[],
+  raw: unknown,
+  score: number,
+  source: string
+) {
+  const cents = parsePriceToCents(raw);
+  if (typeof cents !== "number" || cents <= 0) return;
+  list.push({ cents, score, source });
 }
 
-function collectOfferPrices(ld: any[]): unknown[] {
-  const nodes = flattenLd(ld);
-  const out: unknown[] = [];
+function dedupeCandidates(candidates: PriceCandidate[]) {
+  const bestByCents = new Map<number, PriceCandidate>();
+  for (const c of candidates ?? []) {
+    const existing = bestByCents.get(c.cents);
+    if (!existing || c.score > existing.score) bestByCents.set(c.cents, c);
+  }
+  return Array.from(bestByCents.values());
+}
 
-  const pushPrice = (v: unknown) => {
-    if (v != null) out.push(v);
+function filterCandidatesByMsrp(candidates: PriceCandidate[], msrpCents: number | null) {
+  if (!msrpCents || msrpCents <= 0) return candidates;
+  const floor = Math.max(1, Math.round(msrpCents * 0.3));
+  const above = candidates.filter((c) => c.cents >= floor);
+  return above.length ? above : candidates;
+}
+
+function scoreCandidate(candidate: PriceCandidate, msrpCents: number | null) {
+  let score = candidate.score;
+  if (msrpCents && msrpCents > 0) {
+    const ratio = candidate.cents / msrpCents;
+    if (ratio < 0.3) score -= 40;
+    else if (ratio < 0.45) score -= 10;
+    if (ratio > 1.8) score -= 5;
+  }
+  return score;
+}
+
+function pickBestCandidate(candidates: PriceCandidate[], msrpCents: number | null) {
+  const unique = dedupeCandidates(candidates);
+  const filtered = filterCandidatesByMsrp(unique, msrpCents);
+  if (!filtered.length) return null;
+
+  return filtered.sort((a, b) => {
+    const sa = scoreCandidate(a, msrpCents);
+    const sb = scoreCandidate(b, msrpCents);
+    if (sa !== sb) return sb - sa;
+    if (msrpCents && msrpCents > 0) {
+      const da = Math.abs(a.cents - msrpCents);
+      const db = Math.abs(b.cents - msrpCents);
+      if (da !== db) return da - db;
+    }
+    return b.cents - a.cents;
+  })[0];
+}
+
+function collectLdCandidates(ld: any[]): { candidates: PriceCandidate[]; availability: unknown | null } {
+  const nodes = flattenLd(ld);
+  const candidates: PriceCandidate[] = [];
+  let availability: unknown | null = null;
+
+  const sellerBoost = (offer: any) => {
+    const seller = offer?.seller;
+    const name =
+      typeof seller === "string"
+        ? seller
+        : typeof seller?.name === "string"
+          ? seller.name
+          : "";
+    return name.toLowerCase().includes("amazon") ? 5 : 0;
+  };
+
+  const addSpecPrice = (spec: any, baseScore: number, source: string) => {
+    if (!spec || typeof spec !== "object" || isUnitPriceSpec(spec)) return;
+    addPriceCandidate(candidates, spec.price, baseScore, source);
+  };
+
+  const addOfferPrices = (offer: any) => {
+    if (!offer) return;
+    if (availability == null && offer.availability != null) availability = offer.availability;
+    const boost = sellerBoost(offer);
+    if (offer.price != null) addPriceCandidate(candidates, offer.price, 95 + boost, "ld-offer-price");
+
+    const spec = offer.priceSpecification;
+    if (Array.isArray(spec)) {
+      for (const s of spec) addSpecPrice(s, 92 + boost, "ld-offer-price-spec");
+    } else {
+      addSpecPrice(spec, 92 + boost, "ld-offer-price-spec");
+    }
+
+    if (offer.lowPrice != null) {
+      addPriceCandidate(candidates, offer.lowPrice, 70 + boost, "ld-offer-lowprice");
+    }
+    if (offer.highPrice != null) {
+      addPriceCandidate(candidates, offer.highPrice, 55 + boost, "ld-offer-highprice");
+    }
   };
 
   for (const node of nodes) {
+    if (availability == null && node?.availability != null) availability = node.availability;
+
     const offers = node?.offers;
-    const take = (o: any) => {
-      if (!o) return;
-      pushPrice(o?.price);
-      if (o?.priceSpecification?.price != null && !isUnitPriceSpec(o.priceSpecification)) {
-        pushPrice(o.priceSpecification.price);
-      }
-    };
-
     if (Array.isArray(offers)) {
-      for (const o of offers) take(o);
+      for (const offer of offers) addOfferPrices(offer);
     } else if (offers) {
-      take(offers);
+      addOfferPrices(offers);
     }
 
-    pushPrice(node?.price);
-    if (node?.priceSpecification?.price != null && !isUnitPriceSpec(node.priceSpecification)) {
-      pushPrice(node.priceSpecification.price);
+    if (node?.price != null) addPriceCandidate(candidates, node.price, 75, "ld-node-price");
+
+    const nodeSpec = node?.priceSpecification;
+    if (Array.isArray(nodeSpec)) {
+      for (const s of nodeSpec) addSpecPrice(s, 72, "ld-node-price-spec");
+    } else {
+      addSpecPrice(nodeSpec, 72, "ld-node-price-spec");
+    }
+
+    if (node?.lowPrice != null) {
+      addPriceCandidate(candidates, node.lowPrice, 60, "ld-node-lowprice");
     }
   }
 
-  return out;
-}
-
-function pickLowestPriceCents(candidates: unknown[]): number | null {
-  let best: number | null = null;
-
-  for (const candidate of candidates ?? []) {
-    const cents = parsePriceToCents(candidate);
-    if (typeof cents !== "number" || cents <= 0) continue;
-    if (best == null || cents < best) best = cents;
-  }
-
-  return best;
+  return { candidates, availability };
 }
 
 function availabilityToInStock(v: unknown): boolean | null {
@@ -397,77 +457,185 @@ function isUnitPriceContext(html: string, idx: number) {
   );
 }
 
-function extractPriceCandidatesFromHtml(html: string): { strong: string[]; weak: string[] } {
-  const strong: string[] = [];
-  const weak: string[] = [];
-  const strongPatterns = [
-    /id=["']priceblock_ourprice["'][^>]*>\s*([^<]+)/gi,
-    /id=["']priceblock_dealprice["'][^>]*>\s*([^<]+)/gi,
-    /id=["']priceblock_saleprice["'][^>]*>\s*([^<]+)/gi,
-    /id=["']priceblock_pospromoprice["'][^>]*>\s*([^<]+)/gi,
-    /class=["'][^"']*apexPriceToPay[^"']*["'][^>]*>[\s\S]*?<span[^>]*class=["'][^"']*a-offscreen[^"']*["'][^>]*>([^<]+)/gi,
-    /class=["'][^"']*a-price[^"']*["'][^>]*>[\s\S]*?<span[^>]*class=["'][^"']*a-offscreen[^"']*["'][^>]*>([^<]+)/gi,
-    /itemprop=["']price["'][^>]*content=["']([^"']+)["']/gi,
-    /itemprop=["']price["'][^>]*>\s*([^<]+)/gi,
-    /"price"\s*:\s*"(\d+(?:\.\d+)?)"/gi,
-    /"priceToPay"\s*:\s*\{\s*"value"\s*:\s*"?(\\d+(?:\\.\\d+)?)"?/gi,
+function isInstallmentContext(html: string, idx: number) {
+  const windowStart = Math.max(0, idx - 60);
+  const windowEnd = Math.min(html.length, idx + 80);
+  const context = html.slice(windowStart, windowEnd).toLowerCase();
+  return (
+    context.includes("per month") ||
+    context.includes("per week") ||
+    context.includes("weeks") ||
+    context.includes("months") ||
+    context.includes("installment") ||
+    context.includes("payments") ||
+    context.includes("pay over time") ||
+    context.includes("klarna") ||
+    context.includes("affirm") ||
+    context.includes("x4")
+  );
+}
+
+function isListPriceContext(html: string, idx: number) {
+  const windowStart = Math.max(0, idx - 80);
+  const windowEnd = Math.min(html.length, idx + 80);
+  const context = html.slice(windowStart, windowEnd).toLowerCase();
+  return (
+    context.includes("list price") ||
+    context.includes("price was") ||
+    context.includes("was:") ||
+    context.includes("was price") ||
+    context.includes("a-text-price") ||
+    context.includes("priceblock_strikeprice") ||
+    context.includes("priceblock_ourprice_strike") ||
+    context.includes("priceblock_dealprice_strike") ||
+    context.includes("priceblock_saleprice_strike") ||
+    context.includes("strikeprice") ||
+    context.includes("data-a-strike")
+  );
+}
+
+function isSecondaryPriceContext(html: string, idx: number) {
+  const windowStart = Math.max(0, idx - 80);
+  const windowEnd = Math.min(html.length, idx + 80);
+  const context = html.slice(windowStart, windowEnd).toLowerCase();
+  const hasWord = (word: string) => new RegExp(`\\b${word}\\b`).test(context);
+  return (
+    hasWord("used") ||
+    context.includes("used & new") ||
+    context.includes("new & used") ||
+    context.includes("pre-owned") ||
+    context.includes("preowned") ||
+    hasWord("refurbished") ||
+    hasWord("renewed") ||
+    hasWord("rental") ||
+    context.includes("for rent") ||
+    context.includes("other sellers") ||
+    context.includes("more buying choices") ||
+    context.includes("from other sellers") ||
+    context.includes("used from") ||
+    context.includes("new from")
+  );
+}
+
+function isPromoContext(html: string, idx: number) {
+  const windowStart = Math.max(0, idx - 40);
+  const windowEnd = Math.min(html.length, idx + 40);
+  const context = html.slice(windowStart, windowEnd).toLowerCase();
+  const hasWord = (word: string) => new RegExp(`\\b${word}\\b`).test(context);
+  return (
+    hasWord("off") ||
+    hasWord("save") ||
+    hasWord("coupon") ||
+    hasWord("reward") ||
+    hasWord("savings") ||
+    hasWord("discount") ||
+    hasWord("promo")
+  );
+}
+
+function shouldExcludePriceCandidate(
+  html: string,
+  idx: number,
+  opts?: { includePromo?: boolean }
+) {
+  if (isUnitPriceContext(html, idx)) return true;
+  if (isInstallmentContext(html, idx)) return true;
+  if (isListPriceContext(html, idx)) return true;
+  if (isSecondaryPriceContext(html, idx)) return true;
+  if (opts?.includePromo && isPromoContext(html, idx)) return true;
+  return false;
+}
+
+function collectHtmlPriceCandidates(html: string): PriceCandidate[] {
+  const candidates: PriceCandidate[] = [];
+  const patterns: Array<{ re: RegExp; score: number; source: string; includePromo?: boolean }> = [
+    { re: /id=["']priceblock_ourprice["'][^>]*>\s*([^<]+)/gi, score: 98, source: "priceblock_ourprice" },
+    { re: /id=["']priceblock_dealprice["'][^>]*>\s*([^<]+)/gi, score: 98, source: "priceblock_dealprice" },
+    { re: /id=["']priceblock_saleprice["'][^>]*>\s*([^<]+)/gi, score: 95, source: "priceblock_saleprice" },
+    {
+      re: /id=["']priceblock_pospromoprice["'][^>]*>\s*([^<]+)/gi,
+      score: 92,
+      source: "priceblock_pospromoprice",
+    },
+    {
+      re: /class=["'][^"']*apexPriceToPay[^"']*["'][^>]*>[\s\S]*?<span[^>]*class=["'][^"']*a-offscreen[^"']*["'][^>]*>([^<]+)/gi,
+      score: 90,
+      source: "apexPriceToPay",
+    },
+    {
+      re: /id=["']corePriceDisplay[^"']*["'][^>]*>[\s\S]*?class=["'][^"']*a-offscreen[^"']*["'][^>]*>([^<]+)/gi,
+      score: 88,
+      source: "corePriceDisplay",
+    },
+    {
+      re: /itemprop=["']price["'][^>]*content=["']([^"']+)["']/gi,
+      score: 85,
+      source: "itemprop-price",
+    },
+    {
+      re: /itemprop=["']price["'][^>]*>\s*([^<]+)/gi,
+      score: 80,
+      source: "itemprop-price-text",
+    },
+    {
+      re: /"priceToPay"\s*:\s*\{[^}]*"value"\s*:\s*"?(\d+(?:\.\d+)?)"?/gi,
+      score: 82,
+      source: "priceToPay",
+    },
+    { re: /"price"\s*:\s*"(\d+(?:\.\d+)?)"/gi, score: 55, source: "json-price" },
+    {
+      re: /class=["'][^"']*a-price[^"']*["'][^>]*>[\s\S]*?<span[^>]*class=["'][^"']*a-offscreen[^"']*["'][^>]*>([^<]+)/gi,
+      score: 60,
+      source: "a-price-offscreen",
+    },
   ];
 
-  for (const re of strongPatterns) {
+  for (const { re, score, source, includePromo } of patterns) {
     for (const m of html.matchAll(re)) {
       if (!m?.[1]) continue;
-      if (isUnitPriceContext(html, m.index ?? 0)) continue;
-      strong.push(m[1]);
+      const idx = m.index ?? 0;
+      if (shouldExcludePriceCandidate(html, idx, { includePromo })) {
+        continue;
+      }
+      addPriceCandidate(candidates, m[1], score, source);
     }
   }
 
-  const whole = html.match(/class=["']a-price-whole["']>\s*([\d,.]+)/i);
-  if (whole?.[1]) {
-    const fraction = html.match(/class=["']a-price-fraction["']>\s*(\d{2})/i);
-    const frac = fraction?.[1] ?? "00";
-    strong.push(`${whole[1]}.${frac}`);
+  for (const m of html.matchAll(/class=["']a-price-whole["']>\s*([\d,.]+)/gi)) {
+    if (!m?.[1]) continue;
+    const idx = m.index ?? 0;
+    if (shouldExcludePriceCandidate(html, idx, { includePromo: true })) continue;
+    const fractionMatch = html.slice(idx, idx + 120).match(/class=["']a-price-fraction["']>\s*(\d{2})/i);
+    const frac = fractionMatch?.[1] ?? "00";
+    addPriceCandidate(candidates, `${m[1]}.${frac}`, 58, "a-price-whole");
   }
 
   for (const m of html.matchAll(/\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/g)) {
     if (!m?.[1]) continue;
-    if (isUnitPriceContext(html, m.index ?? 0)) continue;
     const idx = m.index ?? 0;
-    const windowStart = Math.max(0, idx - 32);
-    const windowEnd = Math.min(html.length, idx + 32);
-    const context = html.slice(windowStart, windowEnd).toLowerCase();
-    if (
-      context.includes("off") ||
-      context.includes("save") ||
-      context.includes("coupon") ||
-      context.includes("reward") ||
-      context.includes("savings") ||
-      context.includes("discount") ||
-      context.includes("promo")
-    ) {
+    if (shouldExcludePriceCandidate(html, idx, { includePromo: true })) {
       continue;
     }
-    weak.push(m[1]);
+    addPriceCandidate(candidates, m[1], 35, "usd-text");
   }
 
-  return { strong, weak };
+  return candidates;
 }
 
-function parseAmazonLikeHtml(html: string): { priceCents: number | null; inStock: boolean | null } {
+function parseAmazonLikeHtml(
+  html: string,
+  msrpCents: number | null
+): { priceCents: number | null; inStock: boolean | null; priceSource: string | null } {
   const ld = extractJsonLd(html);
-  const found = findOfferPrice(ld);
-  let priceCents = parsePriceToCents(found?.price);
-  if (priceCents == null) {
-    const ldCandidates = collectOfferPrices(ld);
-    const htmlCandidates = extractPriceCandidatesFromHtml(html);
-    const htmlPool = htmlCandidates.strong.length ? htmlCandidates.strong : htmlCandidates.weak;
-    priceCents = pickLowestPriceCents(ldCandidates.length ? ldCandidates : htmlPool);
-  }
+  const { candidates: ldCandidates, availability } = collectLdCandidates(ld);
+  const htmlCandidates = collectHtmlPriceCandidates(html);
+  const best = pickBestCandidate([...ldCandidates, ...htmlCandidates], msrpCents);
+  const priceCents = best?.cents ?? null;
 
-  const availability = availabilityToInStock(found?.availability);
   const htmlAvailability = extractAvailabilityFromHtml(html);
-  const inStock = availability ?? htmlAvailability ?? (priceCents != null ? true : null);
+  const inStock = availabilityToInStock(availability) ?? htmlAvailability ?? (priceCents != null ? true : null);
 
-  return { priceCents, inStock };
+  return { priceCents, inStock, priceSource: best?.source ?? null };
 }
 
 async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
@@ -530,7 +698,6 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
     };
   }
 
-  const { priceCents, inStock } = parseAmazonLikeHtml(html);
   const identity = await resolveSetIdentityFromAmazonHtml(html);
   const imageUrl = extractAmazonImageUrl(html);
   const currentIsNumeric = isLikelySetId(setId);
@@ -555,10 +722,13 @@ async function refreshOne(input: RefreshInput): Promise<RefreshResult> {
 
   await updateSetImageIfPlaceholder(effectiveSetId, imageUrl);
 
+  const msrpCents = await getSetMsrpCents(effectiveSetId);
+  const { priceCents, inStock, priceSource } = parseAmazonLikeHtml(html, msrpCents);
+
   console.log(
     `[AMAZON_REFRESH] parsed setId=${effectiveSetId} priceCents=${priceCents ?? "null"} inStock=${
       inStock ?? "null"
-    }`
+    } source=${priceSource ?? "unknown"}`
   );
 
   await prisma.offer.upsert({
