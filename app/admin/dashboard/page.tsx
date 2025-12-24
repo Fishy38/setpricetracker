@@ -421,6 +421,24 @@ export default async function AdminDashboardPage() {
           </div>
 
           <div className="border border-zinc-700 rounded p-4 bg-zinc-950 space-y-4">
+            <div className="text-xs uppercase tracking-wide text-zinc-500">Amazon Import</div>
+
+            <form action="/api/admin/import-amazon-links" method="POST" className="space-y-3">
+              <textarea
+                name="links"
+                placeholder="Paste Amazon links (one per line). Duplicate set IDs are skipped."
+                className="w-full min-h-[180px] rounded bg-black border border-zinc-800 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="submit"
+                className="bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 transition"
+              >
+                Import Amazon Links
+              </button>
+            </form>
+          </div>
+
+          <div className="border border-zinc-700 rounded p-4 bg-zinc-950 space-y-4">
             <div className="text-xs uppercase tracking-wide text-zinc-500">Utilities</div>
 
             <form action="/api/admin/fetch-rakuten" method="GET" className="flex flex-col sm:flex-row gap-2">

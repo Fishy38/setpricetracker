@@ -8,7 +8,6 @@ import { parsePriceToCents } from "@/lib/utils";
 import { getAmazonSitestripeUrl } from "@/lib/amazon-sitestripe";
 
 const AMAZON_RETAILER = "Amazon";
-const AMAZON_HOST_RE = /(^|\.)amazon\.[a-z.]+$/i;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
 
@@ -32,10 +31,6 @@ export type RefreshAllResult = {
   error?: string;
 };
 
-function isAmazonHost(host: string) {
-  return AMAZON_HOST_RE.test(host);
-}
-
 function normalizeAmazonUrl(raw: string | null | undefined): { url: string | null; error?: string } {
   const trimmed = String(raw ?? "").trim();
   if (!trimmed) return { url: null, error: "Missing amazonUrl" };
@@ -45,13 +40,6 @@ function normalizeAmazonUrl(raw: string | null | undefined): { url: string | nul
     const protocol = u.protocol.toLowerCase();
     if (protocol !== "http:" && protocol !== "https:") {
       return { url: null, error: "Unsupported URL protocol" };
-    }
-
-    const host = u.hostname.toLowerCase();
-
-    // Only allow real Amazon domains (SSRF guard + no clone requirement)
-    if (!isAmazonHost(host)) {
-      return { url: null, error: `Blocked host "${host}". Only amazon.* URLs are allowed.` };
     }
 
     return { url: u.toString() };

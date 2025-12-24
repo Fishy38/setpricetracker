@@ -114,9 +114,11 @@ export function applyAmazonSitestripeToOffers<T extends { retailer?: string | nu
     }
 
     sawAmazon = true;
-    if (!sitestripeUrl) continue;
-
-    out.push({ ...o, retailer: "Amazon", url: sitestripeUrl });
+    if (sitestripeUrl) {
+      out.push({ ...o, retailer: "Amazon", url: sitestripeUrl });
+    } else {
+      out.push(o);
+    }
   }
 
   if (sitestripeUrl && !sawAmazon) {

@@ -325,6 +325,11 @@ function inferType(row: { setId: string; name?: string | null }) {
   // Real LEGO set numbers / numeric IDs: treat as SET
   if (isRealSetId(id)) return "SET";
 
+  // Non-numeric IDs (ex: Amazon ASIN) that still look like LEGO sets
+  if (name.includes("lego") && !MERCH_KEYWORDS.some((k) => name.includes(k))) {
+    return "SET";
+  }
+
   // Everything else: merch
   // (We still keep keywords here in case you later want to split merch categories)
   if (MERCH_KEYWORDS.some((k) => name.includes(k))) return "MERCH";
